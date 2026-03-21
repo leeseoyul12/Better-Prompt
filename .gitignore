@@ -143,6 +143,3 @@ vite.config.ts.timestamp-*
 venv/
 __pycache__/
 *.py[cod]
-
-.env
-.env.example

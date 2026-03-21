@@ -260,6 +260,11 @@ async function handlePromptCoachClick(inputElement) {
   console.log("[Prompt Coach] Current prompt:", promptText);
 
   const popupParts = createPromptCoachPopup(promptText);
+  if (!promptText) {
+    renderErrorState(popupParts.resultsContainer, "프롬프트를 먼저 입력해 주세요.");
+    return;
+  }
+
   renderLoadingState(popupParts.resultsContainer);
 
   try {

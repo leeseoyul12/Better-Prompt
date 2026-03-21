@@ -4,6 +4,7 @@ deactivate: 가상환경 닫고 키는거
 
 pip freeze > requirements.txt
 
+
  실행 하는 방법:
  cd backend
 python -m venv .venv
@@ -15,3 +16,7 @@ copy .env.example .env
 cd ..
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 
+
+이건 집에서
+cd /d "C:\Users\hiway\OneDrive\바탕 화면\새 폴더\Prompt-Coach\backend"
+.venv\Scripts\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000

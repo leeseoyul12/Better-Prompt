@@ -1,10 +1,13 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables from a local .env file if it exists.
-load_dotenv()
+
+# backend 폴더의 .env를 고정 경로로 읽어 실행 위치에 영향받지 않게 한다.
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 
 @dataclass(frozen=True)

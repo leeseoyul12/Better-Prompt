@@ -4,13 +4,23 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
-from .config import settings
-from .providers import (
-    GeminiPromptProvider,
-    PromptAnalysisProvider,
-    ProviderConfigError,
-    ProviderRequestError,
-)
+try:
+    from .config import settings
+    from .providers import (
+        GeminiPromptProvider,
+        PromptAnalysisProvider,
+        ProviderConfigError,
+        ProviderRequestError,
+    )
+except ImportError:
+    # uvicorn main:app 형태(backend 폴더 실행)도 지원하기 위한 fallback import.
+    from config import settings
+    from providers import (
+        GeminiPromptProvider,
+        PromptAnalysisProvider,
+        ProviderConfigError,
+        ProviderRequestError,
+    )
 
 
 class ImproveRequest(BaseModel):
@@ -18,13 +28,21 @@ class ImproveRequest(BaseModel):
 
 
 class Issue(BaseModel):
-    type: str
-    description: str
+    # 카테고리명은 비어 있지 않도록 최소 길이를 둔다.
+    type: str = Field(..., min_length=1, max_length=60)
+    # 한 줄 설명 규칙을 지키기 위해 줄바꿈 문자를 금지한다.
+    description: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[^\r\n]+$",
+    )
 
 
 class ImproveResponse(BaseModel):
-    issues: List[Issue]
-    improved_prompt: str
+    # 핵심 계약: 문제점 카테고리는 반드시 2~3개만 허용한다.
+    issues: List[Issue] = Field(..., min_length=2, max_length=3)
+    improved_prompt: str = Field(..., min_length=1)
 
 
 def get_provider() -> PromptAnalysisProvider:
