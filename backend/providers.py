@@ -55,11 +55,12 @@ Rules:
   ],
   "improved_prompt": "string"
 }}
-2. issues must contain 2 or 3 items.
-3. Keep issue descriptions to one short sentence each.
-4. improved_prompt must be practical, clearer, and more specific.
-5. Use Korean in both issues and improved_prompt.
-6. Do not include markdown, explanations, or extra keys.
+2. issues may contain 0 to 3 items.
+3. If the original prompt is already strong and clear, return an empty issues array.
+4. Keep issue descriptions to one short sentence each.
+5. improved_prompt must stay practical and natural, even when only small improvement is needed.
+6. Use Korean in both issues and improved_prompt.
+7. Do not include markdown, explanations, or extra keys.
 
 User prompt:
 {prompt}

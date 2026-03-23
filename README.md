@@ -1,6 +1,14 @@
-# Prompt Coach
+# Better Prompt
 
 ChatGPT 입력창 옆 `✨` 버튼을 눌렀을 때만 동작하는 프롬프트 개선 도구입니다.
+
+## 문제 정의
+
+이 대 AI 시대에 사람들은 프롬프트를 별로 신경쓰지 않고 쓰는 경우가 많음
+
+## 목표
+프롬프트 공부를 굳이 하지 않아도, 매번 신경쓰지 않아도
+좋은 프롬프트를 쓸 수 있게 함
 
 ## 현재 구현 상태
 
@@ -16,18 +24,19 @@ ChatGPT 입력창 옆 `✨` 버튼을 눌렀을 때만 동작하는 프롬프트
 3. 버튼 클릭 시 현재 입력 텍스트 수집
 4. 백엔드 `/improve` API 호출
 5. 아래 응답 구조 표시
-   - `issues` (2~3개)
+   - `issues` (0~3개)
    - 각 이슈 한 줄 설명
    - `improved_prompt`
 6. 팝업 UI에서 결과 확인
 7. 사용자 선택
    - `유지하기`: 닫기
    - `개선 적용`: 입력창 텍스트 교체
+8. 문제점이 없으면 `충분히 좋은 프롬프트입니다!` 안내 표시
 
 ## 프로젝트 구조
 
 ```text
-Prompt-Coach/
+Better-Prompt/
 ├─ backend/
 │  ├─ __init__.py
 │  ├─ config.py
@@ -84,7 +93,7 @@ uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 
 `POST /improve` 응답은 아래 규칙을 검증합니다.
 
-- `issues`: 2~3개만 허용
+- `issues`: 0~3개만 허용
 - `issues[].type`: 비어 있지 않은 문자열
 - `issues[].description`: 줄바꿈 없는 한 줄 문자열
 - `improved_prompt`: 비어 있지 않은 문자열

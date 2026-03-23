@@ -236,10 +236,42 @@ function renderIssues(issueListElement, issues) {
 }
 
 /**
+ * 문제점이 없을 때 긍정 안내 문구를 보여준다.
+ */
+function renderNoIssuesMessage(resultsContainer) {
+  resultsContainer.innerHTML = `
+    <div class="prompt-coach-popup-section">
+      <p class="prompt-coach-section-title">분석 결과</p>
+      <div class="prompt-coach-status"이미 충분히 구조화된 프롬프트입니다!</div>
+    </div>
+    <div class="prompt-coach-popup-section">
+      <p class="prompt-coach-section-title">추천 프롬프트</p>
+      <div class="prompt-coach-improved-prompt"></div>
+    </div>
+  `;
+}
+
+/**
  * Shows API analysis content inside the popup.
  */
 function renderAnalysisState(resultsContainer, analysisResult) {
   if (!resultsContainer) {
+    return;
+  }
+
+  const issues = Array.isArray(analysisResult?.issues) ? analysisResult.issues : [];
+
+  if (issues.length === 0) {
+    renderNoIssuesMessage(resultsContainer);
+
+    const improvedPromptElement = resultsContainer.querySelector(
+      ".prompt-coach-improved-prompt"
+    );
+
+    if (improvedPromptElement) {
+      improvedPromptElement.textContent = analysisResult?.improved_prompt || "";
+    }
+
     return;
   }
 
@@ -260,7 +292,7 @@ function renderAnalysisState(resultsContainer, analysisResult) {
   );
 
   if (issueListElement) {
-    renderIssues(issueListElement, analysisResult?.issues || []);
+    renderIssues(issueListElement, issues);
   }
 
   if (improvedPromptElement) {

@@ -40,8 +40,8 @@ class Issue(BaseModel):
 
 
 class ImproveResponse(BaseModel):
-    # 핵심 계약: 문제점 카테고리는 반드시 2~3개만 허용한다.
-    issues: List[Issue] = Field(..., min_length=2, max_length=3)
+    # 핵심 계약: 문제점 카테고리는 0~3개까지 허용한다.
+    issues: List[Issue] = Field(..., min_length=0, max_length=3)
     improved_prompt: str = Field(..., min_length=1)
 
 
@@ -125,6 +125,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 

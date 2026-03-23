@@ -9,7 +9,7 @@ pip freeze > requirements.txt
  cd backend
 python -m venv .venv
 # Windows PowerShell
-.venv/Scripts/activate
+.venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
 # .env에서 GEMINI_API_KEY 값 입력
