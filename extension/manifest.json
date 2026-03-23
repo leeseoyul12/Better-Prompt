@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Prompt Coach MVP",
+  "name": "Better Prompt",
   "version": "0.1.0",
-  "description": "Adds a prompt coach button to ChatGPT and connects to local FastAPI /improve API.",
+  "description": "Adds a Better Prompt button to ChatGPT and connects to local FastAPI /improve API.",
   "content_scripts": [
     {
       "matches": [

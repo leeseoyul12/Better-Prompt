@@ -112,11 +112,11 @@ def get_provider() -> PromptAnalysisProvider:
         )
 
     raise ProviderConfigError(
-        f"Unsupported PROMPT_COACH_PROVIDER: '{settings.provider}'"
+        f"Unsupported BETTER_PROMPT_PROVIDER: '{settings.provider}'"
     )
 
 
-app = FastAPI(title="Prompt Coach API")
+app = FastAPI(title="Better Prompt API")
 
 # 로컬 Chrome 확장 프로그램 -> 로컬 FastAPI 통신 허용
 app.add_middleware(

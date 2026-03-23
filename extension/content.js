@@ -1,7 +1,7 @@
-const PROMPT_COACH_BUTTON_ID = "prompt-coach-trigger";
-const PROMPT_COACH_WRAPPER_CLASS = "prompt-coach-wrapper";
-const PROMPT_COACH_POPUP_ID = "prompt-coach-popup";
-const PROMPT_COACH_API_URL = "http://127.0.0.1:8000/improve";
+const BETTER_PROMPT_BUTTON_ID = "better-prompt-trigger";
+const BETTER_PROMPT_WRAPPER_CLASS = "better-prompt-wrapper";
+const BETTER_PROMPT_POPUP_ID = "better-prompt-popup";
+const BETTER_PROMPT_API_URL = "http://127.0.0.1:8000/improve";
 
 /**
  * ChatGPT input box selector.
@@ -69,8 +69,8 @@ function setPromptText(inputElement, nextValue) {
 /**
  * Removes the popup if it already exists.
  */
-function removePromptCoachPopup() {
-  const existingPopup = document.querySelector(`#${PROMPT_COACH_POPUP_ID}`);
+function removeBetterPromptPopup() {
+  const existingPopup = document.querySelector(`#${BETTER_PROMPT_POPUP_ID}`);
 
   if (existingPopup) {
     existingPopup.remove();
@@ -81,7 +81,7 @@ function removePromptCoachPopup() {
  * Calls FastAPI backend and returns prompt analysis JSON.
  */
 async function requestPromptImprovement(promptText) {
-  const response = await fetch(PROMPT_COACH_API_URL, {
+  const response = await fetch(BETTER_PROMPT_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -101,7 +101,7 @@ async function requestPromptImprovement(promptText) {
       }
     } catch (jsonError) {
       // Keep default message when error body is not valid JSON.
-      console.debug("[Prompt Coach] Error response parsing failed:", jsonError);
+      console.debug("[Better Prompt] Error response parsing failed:", jsonError);
     }
 
     throw new Error(detail);
@@ -113,36 +113,36 @@ async function requestPromptImprovement(promptText) {
 /**
  * Creates popup shell first. Result content is filled later.
  */
-function createPromptCoachPopup(currentPrompt) {
-  removePromptCoachPopup();
+function createBetterPromptPopup(currentPrompt) {
+  removeBetterPromptPopup();
 
   const popup = document.createElement("div");
-  popup.id = PROMPT_COACH_POPUP_ID;
-  popup.className = "prompt-coach-popup";
+  popup.id = BETTER_PROMPT_POPUP_ID;
+  popup.className = "better-prompt-popup";
 
   popup.innerHTML = `
-    <div class="prompt-coach-popup-header">
-      <h3>프롬프트 코치</h3>
-      <button type="button" class="prompt-coach-close-button" aria-label="닫기">×</button>
+    <div class="better-prompt-popup-header">
+      <h3>Better Prompt</h3>
+      <button type="button" class="better-prompt-close-button" aria-label="닫기">×</button>
     </div>
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">현재 프롬프트</p>
-      <div class="prompt-coach-preview"></div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">현재 프롬프트</p>
+      <div class="better-prompt-preview"></div>
     </div>
-    <div class="prompt-coach-results"></div>
-    <div class="prompt-coach-popup-actions">
-      <button type="button" class="prompt-coach-secondary-button" data-action="keep">
+    <div class="better-prompt-results"></div>
+    <div class="better-prompt-popup-actions">
+      <button type="button" class="better-prompt-secondary-button" data-action="keep">
         유지하기
       </button>
-      <button type="button" class="prompt-coach-primary-button" data-action="apply" disabled>
+      <button type="button" class="better-prompt-primary-button" data-action="apply" disabled>
         개선 적용
       </button>
     </div>
   `;
 
-  const previewElement = popup.querySelector(".prompt-coach-preview");
-  const resultsContainer = popup.querySelector(".prompt-coach-results");
-  const closeButton = popup.querySelector(".prompt-coach-close-button");
+  const previewElement = popup.querySelector(".better-prompt-preview");
+  const resultsContainer = popup.querySelector(".better-prompt-results");
+  const closeButton = popup.querySelector(".better-prompt-close-button");
   const keepButton = popup.querySelector('[data-action="keep"]');
   const applyButton = popup.querySelector('[data-action="apply"]');
 
@@ -151,11 +151,11 @@ function createPromptCoachPopup(currentPrompt) {
   }
 
   closeButton?.addEventListener("click", () => {
-    removePromptCoachPopup();
+    removeBetterPromptPopup();
   });
 
   keepButton?.addEventListener("click", () => {
-    removePromptCoachPopup();
+    removeBetterPromptPopup();
   });
 
   document.body.appendChild(popup);
@@ -176,9 +176,9 @@ function renderLoadingState(resultsContainer) {
   }
 
   resultsContainer.innerHTML = `
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">분석 결과</p>
-      <div class="prompt-coach-status">프롬프트를 분석하고 있습니다...</div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">분석 결과</p>
+      <div class="better-prompt-status">프롬프트를 분석하고 있습니다...</div>
     </div>
   `;
 }
@@ -192,9 +192,9 @@ function renderErrorState(resultsContainer, message) {
   }
 
   resultsContainer.innerHTML = `
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">오류 안내</p>
-      <div class="prompt-coach-error-box">${message}</div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">오류 안내</p>
+      <div class="better-prompt-error-box">${message}</div>
     </div>
   `;
 }
@@ -208,9 +208,9 @@ function renderNoticeState(resultsContainer, message) {
   }
 
   resultsContainer.innerHTML = `
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">안내</p>
-      <div class="prompt-coach-status">${message}</div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">안내</p>
+      <div class="better-prompt-status">${message}</div>
     </div>
   `;
 }
@@ -221,7 +221,7 @@ function renderNoticeState(resultsContainer, message) {
 function renderIssues(issueListElement, issues) {
   issues.forEach((issue) => {
     const issueItem = document.createElement("li");
-    issueItem.className = "prompt-coach-issue-item";
+    issueItem.className = "better-prompt-issue-item";
 
     const issueTitle = document.createElement("strong");
     issueTitle.textContent = issue.type;
@@ -240,13 +240,13 @@ function renderIssues(issueListElement, issues) {
  */
 function renderNoIssuesMessage(resultsContainer) {
   resultsContainer.innerHTML = `
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">분석 결과</p>
-      <div class="prompt-coach-status"이미 충분히 구조화된 프롬프트입니다!</div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">분석 결과</p>
+      <div class="better-prompt-status">충분히 좋은 프롬프트입니다!</div>
     </div>
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">추천 프롬프트</p>
-      <div class="prompt-coach-improved-prompt"></div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">추천 프롬프트</p>
+      <div class="better-prompt-improved-prompt"></div>
     </div>
   `;
 }
@@ -265,7 +265,7 @@ function renderAnalysisState(resultsContainer, analysisResult) {
     renderNoIssuesMessage(resultsContainer);
 
     const improvedPromptElement = resultsContainer.querySelector(
-      ".prompt-coach-improved-prompt"
+      ".better-prompt-improved-prompt"
     );
 
     if (improvedPromptElement) {
@@ -276,19 +276,19 @@ function renderAnalysisState(resultsContainer, analysisResult) {
   }
 
   resultsContainer.innerHTML = `
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">문제점</p>
-      <ul class="prompt-coach-issue-list"></ul>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">문제점</p>
+      <ul class="better-prompt-issue-list"></ul>
     </div>
-    <div class="prompt-coach-popup-section">
-      <p class="prompt-coach-section-title">개선 프롬프트</p>
-      <div class="prompt-coach-improved-prompt"></div>
+    <div class="better-prompt-popup-section">
+      <p class="better-prompt-section-title">개선 프롬프트</p>
+      <div class="better-prompt-improved-prompt"></div>
     </div>
   `;
 
-  const issueListElement = resultsContainer.querySelector(".prompt-coach-issue-list");
+  const issueListElement = resultsContainer.querySelector(".better-prompt-issue-list");
   const improvedPromptElement = resultsContainer.querySelector(
-    ".prompt-coach-improved-prompt"
+    ".better-prompt-improved-prompt"
   );
 
   if (issueListElement) {
@@ -303,11 +303,11 @@ function renderAnalysisState(resultsContainer, analysisResult) {
 /**
  * Handles click: read prompt, request backend analysis, then render result.
  */
-async function handlePromptCoachClick(inputElement) {
+async function handleBetterPromptClick(inputElement) {
   const promptText = getPromptText(inputElement);
-  console.log("[Prompt Coach] Current prompt:", promptText);
+  console.log("[Better Prompt] Current prompt:", promptText);
 
-  const popupParts = createPromptCoachPopup(promptText);
+  const popupParts = createBetterPromptPopup(promptText);
   if (!promptText) {
     renderNoticeState(popupParts.resultsContainer, "프롬프트를 먼저 입력해 주세요.");
     return;
@@ -327,13 +327,13 @@ async function handlePromptCoachClick(inputElement) {
           const improvedPrompt = analysisResult?.improved_prompt || "";
           setPromptText(inputElement, improvedPrompt);
           inputElement.focus();
-          removePromptCoachPopup();
+          removeBetterPromptPopup();
         },
         { once: true }
       );
     }
   } catch (error) {
-    console.error("[Prompt Coach] Failed to improve prompt:", error);
+    console.error("[Better Prompt] Failed to improve prompt:", error);
     const message =
       error instanceof Error && error.message
         ? error.message
@@ -343,10 +343,10 @@ async function handlePromptCoachClick(inputElement) {
 }
 
 /**
- * Adds the Prompt Coach button next to the ChatGPT input box.
+ * Adds the Better Prompt button next to the ChatGPT input box.
  * If the button already exists, we do nothing.
  */
-function injectPromptCoachButton() {
+function injectBetterPromptButton() {
   const inputElement = getPromptInputElement();
 
   if (!inputElement) {
@@ -360,19 +360,19 @@ function injectPromptCoachButton() {
   }
 
   // Prevent duplicate button creation when the page re-renders.
-  if (inputWrapper.querySelector(`#${PROMPT_COACH_BUTTON_ID}`)) {
+  if (inputWrapper.querySelector(`#${BETTER_PROMPT_BUTTON_ID}`)) {
     return;
   }
 
-  inputWrapper.classList.add(PROMPT_COACH_WRAPPER_CLASS);
+  inputWrapper.classList.add(BETTER_PROMPT_WRAPPER_CLASS);
 
   const button = document.createElement("button");
-  button.id = PROMPT_COACH_BUTTON_ID;
+  button.id = BETTER_PROMPT_BUTTON_ID;
   button.type = "button";
-  button.className = "prompt-coach-button";
+  button.className = "better-prompt-button";
   button.textContent = "✨";
-  button.title = "프롬프트 코치";
-  button.setAttribute("aria-label", "프롬프트 코치");
+  button.title = "Better Prompt";
+  button.setAttribute("aria-label", "Better Prompt");
 
   button.addEventListener("click", () => {
     const latestInput = getPromptInputElement();
@@ -381,7 +381,7 @@ function injectPromptCoachButton() {
       return;
     }
 
-    handlePromptCoachClick(latestInput);
+    handleBetterPromptClick(latestInput);
   });
 
   inputWrapper.appendChild(button);
@@ -391,11 +391,11 @@ function injectPromptCoachButton() {
  * ChatGPT updates the page dynamically, so we observe DOM changes
  * and try to inject the button whenever the input box appears again.
  */
-function startPromptCoach() {
-  injectPromptCoachButton();
+function startBetterPrompt() {
+  injectBetterPromptButton();
 
   const observer = new MutationObserver(() => {
-    injectPromptCoachButton();
+    injectBetterPromptButton();
   });
 
   observer.observe(document.body, {
@@ -404,4 +404,4 @@ function startPromptCoach() {
   });
 }
 
-startPromptCoach();
+startBetterPrompt();
