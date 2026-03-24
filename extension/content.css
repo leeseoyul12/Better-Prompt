@@ -43,6 +43,9 @@
   z-index: 9999;
   width: 360px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 128px);
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
@@ -50,6 +53,7 @@
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   color: #111827;
   font-family: Arial, sans-serif;
+  scrollbar-gutter: stable;
 }
 
 .better-prompt-popup-header {
