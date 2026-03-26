@@ -13,7 +13,8 @@ CONTENT_JS_PATH = ROOT_DIR / "extension" / "content.js"
 class ExtensionScriptTests(unittest.TestCase):
     def test_config_script_is_valid_javascript(self):
         source = CONFIG_JS_PATH.read_text(encoding="utf-8")
-        self.assertIn("YOUR-PUBLIC-BACKEND.example.com/improve", source)
+        self.assertIn('apiUrl: "https://', source)
+        self.assertIn('/improve"', source)
 
         result = subprocess.run(
             [

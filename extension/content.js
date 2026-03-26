@@ -64,6 +64,60 @@ function getPromptInputContainer(inputElement) {
   return inputElement.closest("form") || inputElement.parentElement || inputElement;
 }
 
+function getBottomRightActionButtons(inputWrapper) {
+  if (!(inputWrapper instanceof Element)) {
+    return [];
+  }
+
+  const wrapperRect = inputWrapper.getBoundingClientRect();
+  const visibleButtons = Array.from(inputWrapper.querySelectorAll("button")).filter(
+    (button) => {
+      if (!(button instanceof HTMLButtonElement)) {
+        return false;
+      }
+
+      if (button.id === BETTER_PROMPT_BUTTON_ID || !isVisibleElement(button)) {
+        return false;
+      }
+
+      const rect = button.getBoundingClientRect();
+      const isNearBottom = rect.bottom >= wrapperRect.bottom - 80;
+      const isNearRight = rect.left >= wrapperRect.left + wrapperRect.width / 2;
+      return isNearBottom && isNearRight;
+    }
+  );
+
+  return visibleButtons;
+}
+
+function updateButtonLayout(inputWrapper) {
+  if (!(inputWrapper instanceof HTMLElement)) {
+    return;
+  }
+
+  const minimumRightOffset = 12;
+  const minimumInputPadding = 96;
+  const wrapperRect = inputWrapper.getBoundingClientRect();
+  const actionButtons = getBottomRightActionButtons(inputWrapper);
+
+  let buttonRightOffset = minimumRightOffset;
+  if (actionButtons.length > 0) {
+    const leftmostAction = Math.min(
+      ...actionButtons.map((button) => button.getBoundingClientRect().left)
+    );
+
+    // ChatGPT 기본 버튼 묶음의 왼쪽 바깥으로 이동시켜 겹치지 않게 한다.
+    buttonRightOffset = Math.max(
+      minimumRightOffset,
+      Math.ceil(wrapperRect.right - leftmostAction + 8)
+    );
+  }
+
+  const inputPadding = Math.max(minimumInputPadding, buttonRightOffset + 44);
+  inputWrapper.style.setProperty("--better-prompt-button-right", `${buttonRightOffset}px`);
+  inputWrapper.style.setProperty("--better-prompt-input-padding-right", `${inputPadding}px`);
+}
+
 function getPromptText(inputElement) {
   if (!inputElement) {
     return "";
@@ -472,10 +526,12 @@ function injectBetterPromptButton() {
   }
 
   if (inputWrapper.querySelector(`#${BETTER_PROMPT_BUTTON_ID}`)) {
+    updateButtonLayout(inputWrapper);
     return;
   }
 
   inputWrapper.classList.add(BETTER_PROMPT_WRAPPER_CLASS);
+  updateButtonLayout(inputWrapper);
 
   const button = document.createElement("button");
   button.id = BETTER_PROMPT_BUTTON_ID;
@@ -496,6 +552,7 @@ function injectBetterPromptButton() {
   });
 
   inputWrapper.appendChild(button);
+  updateButtonLayout(inputWrapper);
 }
 
 function startBetterPrompt() {
