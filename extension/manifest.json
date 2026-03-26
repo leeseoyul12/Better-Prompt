@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Better Prompt",
   "version": "0.1.0",
-  "description": "Adds a Better Prompt button to ChatGPT and connects to a configured FastAPI /improve API.",
+  "description": "AI 프롬프트를 한 번의 클릭으로 더 명확하고 구체적으로 개선해주는 확장 프로그램입니다.",
   "content_scripts": [
     {
       "matches": [
