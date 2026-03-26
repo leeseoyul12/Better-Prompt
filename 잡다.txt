@@ -15,7 +15,10 @@ copy .env.example .env
 # .env에서 GEMINI_API_KEY 값 입력
 cd ..
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+위는 로컬 개발/테스트용
 
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+다른 기기도 접근 가능하게 열어둠
 
 이건 집에서
 cd /d "C:\Users\hiway\OneDrive\바탕 화면\새 폴더\Prompt-Coach\backend"

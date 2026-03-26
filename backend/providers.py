@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol
 
@@ -6,16 +7,16 @@ import httpx
 
 
 class ProviderConfigError(RuntimeError):
-    """Raised when required provider config is missing."""
+    """필수 provider 설정이 없을 때 사용한다."""
 
 
 class ProviderRequestError(RuntimeError):
-    """Raised when the AI provider request or response is invalid."""
+    """AI provider 호출이나 응답 형식이 잘못되었을 때 사용한다."""
 
 
 class PromptAnalysisProvider(Protocol):
     def analyze_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Return a dict matching ImproveResponse schema."""
+        """ImproveResponse와 맞는 dict를 반환한다."""
 
 
 def _strip_code_fence(text: str) -> str:
@@ -24,6 +25,19 @@ def _strip_code_fence(text: str) -> str:
         cleaned = cleaned.strip("`")
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
+    return cleaned
+
+
+def _extract_json_candidate(text: str) -> str:
+    cleaned = _strip_code_fence(text)
+    if cleaned.startswith("{") and cleaned.endswith("}"):
+        return cleaned
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return cleaned[start : end + 1]
+
     return cleaned
 
 
@@ -67,12 +81,18 @@ User prompt:
 """.strip()
 
 
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in {500, 502, 503, 504}
+
+
 @dataclass
 class GeminiPromptProvider:
     api_key: str
     model: str
     api_base: str
     timeout_seconds: float = 20.0
+    retry_attempts: int = 1
+    max_output_tokens: int = 512
 
     def analyze_prompt(self, prompt: str) -> Dict[str, Any]:
         if not self.api_key:
@@ -88,40 +108,73 @@ class GeminiPromptProvider:
                     "parts": [{"text": _build_gemini_instruction(prompt)}],
                 }
             ],
-            "generationConfig": {"temperature": 0.2},
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": self.max_output_tokens,
+            },
         }
 
-        try:
-            response = httpx.post(
-                endpoint,
-                params={"key": self.api_key},
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            error_body = exc.response.text[:300]
-            raise ProviderRequestError(
-                f"Gemini API returned HTTP {exc.response.status_code}: {error_body}"
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ProviderRequestError(
-                "Failed to call Gemini API. Check network and API endpoint settings."
-            ) from exc
+        last_error: Exception | None = None
+        for attempt in range(self.retry_attempts + 1):
+            try:
+                response = httpx.post(
+                    endpoint,
+                    params={"key": self.api_key},
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
 
-        raw_text = _extract_text_from_gemini(response.json())
-        if not raw_text:
-            raise ProviderRequestError("Gemini API response did not contain text.")
+                try:
+                    response_payload = response.json()
+                except ValueError as exc:
+                    raise ProviderRequestError(
+                        "Gemini API response was not valid JSON."
+                    ) from exc
 
-        cleaned_text = _strip_code_fence(raw_text)
-        try:
-            parsed = json.loads(cleaned_text)
-        except json.JSONDecodeError as exc:
-            raise ProviderRequestError(
-                "Gemini response was not valid JSON in expected schema."
-            ) from exc
+                raw_text = _extract_text_from_gemini(response_payload)
+                if not raw_text:
+                    raise ProviderRequestError("Gemini API response did not contain text.")
 
-        if not isinstance(parsed, dict):
-            raise ProviderRequestError("Gemini response JSON root must be an object.")
+                cleaned_text = _extract_json_candidate(raw_text)
+                try:
+                    parsed = json.loads(cleaned_text)
+                except json.JSONDecodeError as exc:
+                    raise ProviderRequestError(
+                        "Gemini response was not valid JSON in expected schema."
+                    ) from exc
 
-        return parsed
+                if not isinstance(parsed, dict):
+                    raise ProviderRequestError(
+                        "Gemini response JSON root must be an object."
+                    )
+
+                issues = parsed.get("issues")
+                if isinstance(issues, list):
+                    parsed["issues"] = issues[:3]
+
+                return parsed
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if _is_retryable_status(exc.response.status_code) and attempt < self.retry_attempts:
+                    time.sleep(min(0.5 * (attempt + 1), 1.5))
+                    continue
+
+                error_body = exc.response.text[:300]
+                raise ProviderRequestError(
+                    f"Gemini API returned HTTP {exc.response.status_code}: {error_body}"
+                ) from exc
+            except httpx.RequestError as exc:
+                last_error = exc
+                if attempt < self.retry_attempts:
+                    time.sleep(min(0.5 * (attempt + 1), 1.5))
+                    continue
+
+                raise ProviderRequestError(
+                    "Failed to call Gemini API. Check network and API endpoint settings."
+                ) from exc
+
+        if last_error is not None:
+            raise ProviderRequestError("Gemini API request failed unexpectedly.") from last_error
+
+        raise ProviderRequestError("Gemini API request failed unexpectedly.")

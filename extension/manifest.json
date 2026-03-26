@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Better Prompt",
   "version": "0.1.0",
-  "description": "Adds a Better Prompt button to ChatGPT and connects to local FastAPI /improve API.",
+  "description": "Adds a Better Prompt button to ChatGPT and connects to a configured FastAPI /improve API.",
   "content_scripts": [
     {
       "matches": [
@@ -10,6 +10,7 @@
         "https://chat.openai.com/*"
       ],
       "js": [
+        "config.js",
         "content.js"
       ],
       "css": [
