@@ -23,3 +23,15 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 이건 집에서
 cd /d "C:\Users\hiway\OneDrive\바탕 화면\새 폴더\Prompt-Coach\backend"
 .venv\Scripts\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+
+
+3. 실행/테스트 체크 항목
+
+backend/.env에 GEMINI_API_KEY만 넣고 실행하면 됩니다. 모델은 기본값이 이미 gemini-2.5-flash입니다.
+백엔드 검증은 통과했습니다: backend\.venv\Scripts\python.exe -m unittest tests.test_backend_api tests.test_gemini_provider -v
+확장 테스트는 제 변경과 무관하게 현재 로컬 node 버전이 ?? 문법을 못 읽어서 기존처럼 1건 실패합니다: tests.test_extension_script
+실제 확인 순서는 이 정도면 됩니다.
+backend\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+backend/.env에 API Key 입력
+확장에서 현재 백엔드 URL이 로컬인지 배포 URL인지 확인
+ChatGPT 입력창에서 ✨ 클릭 후 /improve 응답 확인

@@ -42,8 +42,9 @@ class Settings:
         "BETTER_PROMPT_PROVIDER",
         os.getenv("PROMPT_COACH_PROVIDER", "gemini"),
     ).strip().lower()
+    # Google AI Studio?쒖꽌 諛쒓툒??API Key濡?Gemini Developer API瑜??몄텧?쒕떎.
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
     gemini_api_base: str = os.getenv(
         "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta"
     ).strip()
