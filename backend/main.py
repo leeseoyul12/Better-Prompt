@@ -2,16 +2,26 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime
 from threading import Lock
-from typing import Deque, DefaultDict, List, Tuple
+from typing import Deque, DefaultDict, List
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 try:
+    from .auth import (
+        AuthenticationError,
+        authenticate_google_access_token,
+        get_user_for_session_token,
+        revoke_session_token,
+    )
     from .config import settings
+    from .database import SavedPrompt, SessionLocal, User, init_database
     from .providers import (
         GeminiPromptProvider,
         PromptAnalysisProvider,
@@ -19,8 +29,14 @@ try:
         ProviderRequestError,
     )
 except ImportError:
-    # backend 폴더에서 `uvicorn main:app`으로 실행할 때를 위한 fallback import
+    from auth import (
+        AuthenticationError,
+        authenticate_google_access_token,
+        get_user_for_session_token,
+        revoke_session_token,
+    )
     from config import settings
+    from database import SavedPrompt, SessionLocal, User, init_database
     from providers import (
         GeminiPromptProvider,
         PromptAnalysisProvider,
@@ -42,9 +58,9 @@ class ImproveRequest(BaseModel):
 
 
 class Issue(BaseModel):
-    # 문제 이름은 짧고 명확하게 유지한다.
+    # 문제 이름은 짧고 명확한 단어로 유지한다.
     type: str = Field(..., min_length=1, max_length=60)
-    # 한 줄 설명으로 제한해서 결과를 읽기 쉽게 만든다.
+    # 한 줄 설명만 허용해 팝업 UI에서 바로 읽히게 만든다.
     description: str = Field(
         ...,
         min_length=1,
@@ -59,6 +75,51 @@ class ImproveResponse(BaseModel):
     improved_prompt: str = Field(..., min_length=1)
 
 
+class GoogleAuthRequest(BaseModel):
+    access_token: str = Field(..., min_length=1, max_length=4096)
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    display_name: str
+
+
+class GoogleAuthResponse(BaseModel):
+    session_token: str
+    user: UserResponse
+
+
+class MeResponse(BaseModel):
+    user: UserResponse
+
+
+class SavedPromptCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=settings.saved_prompt_max_length,
+    )
+
+
+class SavedPromptUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    content: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=settings.saved_prompt_max_length,
+    )
+
+
+class SavedPromptResponse(BaseModel):
+    id: int
+    title: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
 ISSUE_TYPE_MAP = {
     "ambiguity": "모호한 표현",
     "unclear intent": "의도 불명확",
@@ -70,10 +131,10 @@ ISSUE_TYPE_MAP = {
     "not specific enough": "구체성 부족",
     "overly broad request": "범위 과도",
     "too broad": "범위 과도",
-    "output format missing": "출력 형식 미정의",
-    "missing output format": "출력 형식 미정의",
+    "output format missing": "출력 형식 미지정",
+    "missing output format": "출력 형식 미지정",
     "format mismatch": "형식 불일치",
-    "role not defined": "역할 미정의",
+    "role not defined": "역할 미지정",
     "audience unclear": "대상 불명확",
     "objective unclear": "목표 불명확",
 }
@@ -84,13 +145,13 @@ def _normalize_issue_key(raw: str) -> str:
 
 
 def _contains_korean(text: str) -> bool:
-    return any("가" <= ch <= "힣" for ch in text)
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
 
 
 def localize_issue_type(raw_type: str) -> str:
     normalized = _normalize_issue_key(raw_type)
     if not normalized:
-        return "문제 유형 미정"
+        return "문제 유형 미지정"
 
     if _contains_korean(raw_type):
         return raw_type.strip()
@@ -98,14 +159,14 @@ def localize_issue_type(raw_type: str) -> str:
     if normalized in ISSUE_TYPE_MAP:
         return ISSUE_TYPE_MAP[normalized]
 
-    return "문제 유형 미정"
+    return "문제 유형 미지정"
 
 
 def localize_provider_error(message: str) -> str:
     lowered = message.lower()
 
     if "http 429" in lowered:
-        return "AI 사용량이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+        return "AI 사용량이 초과됐습니다. 잠시 후 다시 시도해 주세요."
 
     if "http 404" in lowered and "model" in lowered:
         return "선택한 Gemini 모델을 사용할 수 없습니다. .env의 GEMINI_MODEL 값을 확인해 주세요."
@@ -120,7 +181,7 @@ def localize_provider_error(message: str) -> str:
 
 
 def get_provider() -> PromptAnalysisProvider:
-    """설정된 provider 구현을 반환한다."""
+    """설정된 provider 구현체를 반환한다."""
     if settings.provider == "gemini":
         return GeminiPromptProvider(
             api_key=settings.gemini_api_key,
@@ -143,7 +204,7 @@ class RateLimitResult:
 
 
 class InMemoryRateLimiter:
-    """아주 단순한 고정 창 rate limit 이다."""
+    """아주 단순한 고정 창 rate limit이다."""
 
     def __init__(self, max_requests: int, window_seconds: int) -> None:
         self.max_requests = max(1, max_requests)
@@ -174,19 +235,24 @@ class InMemoryRateLimiter:
 
 app = FastAPI(title="Better Prompt API")
 
-# 공개 배포에서는 허용할 출처만 최소한으로 열어 둔다.
+# 확장 프로그램이 Authorization 헤더를 써야 하므로 허용 메서드와 헤더를 넓혀둔다.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=False,
-    allow_methods=["POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 _rate_limiter = InMemoryRateLimiter(
     max_requests=settings.rate_limit_max_requests,
     window_seconds=settings.rate_limit_window_seconds,
 )
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_database()
 
 
 def _get_client_identifier(request: Request) -> str:
@@ -198,6 +264,60 @@ def _get_client_identifier(request: Request) -> str:
         return request.client.host
 
     return "unknown"
+
+
+def _to_user_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+    )
+
+
+def _to_saved_prompt_response(saved_prompt: SavedPrompt) -> SavedPromptResponse:
+    return SavedPromptResponse(
+        id=saved_prompt.id,
+        title=saved_prompt.title,
+        content=saved_prompt.content,
+        created_at=saved_prompt.created_at,
+        updated_at=saved_prompt.updated_at,
+    )
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+
+    prefix = "bearer "
+    lowered = authorization.lower()
+    if not lowered.startswith(prefix):
+        raise HTTPException(status_code=401, detail="올바른 인증 토큰 형식이 아닙니다.")
+
+    token = authorization[len(prefix) :].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="인증 토큰이 비어 있습니다.")
+
+    return token
+
+
+def get_db() -> Session:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User:
+    token = _extract_bearer_token(authorization)
+
+    try:
+        return get_user_for_session_token(db, token)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail="로그인 세션이 만료됐습니다.") from exc
 
 
 @app.middleware("http")
@@ -218,9 +338,7 @@ async def request_logging_and_rate_limit(
             )
             response = JSONResponse(
                 status_code=429,
-                content={
-                    "detail": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
-                },
+                content={"detail": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."},
             )
             response.headers["Retry-After"] = str(limit_result.retry_after_seconds)
             return response
@@ -255,7 +373,6 @@ def improve_prompt(request: Request, payload: ImproveRequest) -> ImproveResponse
         )
         result = provider.analyze_prompt(payload.prompt)
 
-        # 타입명이 영어로 오면 한국어 카테고리로 바꿔 둔다.
         issues = result.get("issues")
         if isinstance(issues, list):
             for issue in issues:
@@ -280,3 +397,120 @@ def improve_prompt(request: Request, payload: ImproveRequest) -> ImproveResponse
             status_code=502,
             detail="AI 응답 형식이 올바르지 않습니다. 잠시 후 다시 시도해 주세요.",
         ) from exc
+
+
+@app.post("/auth/google", response_model=GoogleAuthResponse)
+def authenticate_google(
+    payload: GoogleAuthRequest,
+    db: Session = Depends(get_db),
+) -> GoogleAuthResponse:
+    """구글 access token을 검증하고 서비스 세션을 발급한다."""
+    try:
+        session = authenticate_google_access_token(db, payload.access_token)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail="구글 로그인 검증에 실패했습니다.") from exc
+
+    return GoogleAuthResponse(
+        session_token=session.session_token,
+        user=_to_user_response(session.user),
+    )
+
+
+@app.post("/auth/logout")
+def logout(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """현재 서비스 세션을 종료한다."""
+    token = _extract_bearer_token(authorization)
+    revoke_session_token(db, token)
+    return {"detail": "로그아웃되었습니다."}
+
+
+@app.get("/me", response_model=MeResponse)
+def me(current_user: User = Depends(get_current_user)) -> MeResponse:
+    """현재 로그인 사용자 정보를 반환한다."""
+    return MeResponse(user=_to_user_response(current_user))
+
+
+@app.get("/saved-prompts", response_model=list[SavedPromptResponse])
+def list_saved_prompts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[SavedPromptResponse]:
+    """현재 사용자의 저장 프롬프트 목록을 최신순으로 반환한다."""
+    saved_prompts = db.scalars(
+        select(SavedPrompt)
+        .where(SavedPrompt.user_id == current_user.id)
+        .order_by(SavedPrompt.updated_at.desc(), SavedPrompt.id.desc())
+    ).all()
+    return [_to_saved_prompt_response(item) for item in saved_prompts]
+
+
+@app.post("/saved-prompts", response_model=SavedPromptResponse)
+def create_saved_prompt(
+    payload: SavedPromptCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SavedPromptResponse:
+    """개선된 프롬프트를 제목과 함께 저장한다."""
+    saved_prompt = SavedPrompt(
+        user_id=current_user.id,
+        title=payload.title.strip(),
+        content=payload.content.strip(),
+    )
+    db.add(saved_prompt)
+    db.commit()
+    db.refresh(saved_prompt)
+    return _to_saved_prompt_response(saved_prompt)
+
+
+@app.patch("/saved-prompts/{saved_prompt_id}", response_model=SavedPromptResponse)
+def update_saved_prompt(
+    saved_prompt_id: int,
+    payload: SavedPromptUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SavedPromptResponse:
+    """저장된 프롬프트의 제목 또는 본문을 수정한다."""
+    if payload.title is None and payload.content is None:
+        raise HTTPException(status_code=400, detail="수정할 값이 없습니다.")
+
+    saved_prompt = db.scalar(
+        select(SavedPrompt).where(
+            SavedPrompt.id == saved_prompt_id,
+            SavedPrompt.user_id == current_user.id,
+        )
+    )
+    if saved_prompt is None:
+        raise HTTPException(status_code=404, detail="저장된 프롬프트를 찾을 수 없습니다.")
+
+    if payload.title is not None:
+        saved_prompt.title = payload.title.strip()
+    if payload.content is not None:
+        saved_prompt.content = payload.content.strip()
+
+    db.commit()
+    db.refresh(saved_prompt)
+    return _to_saved_prompt_response(saved_prompt)
+
+
+@app.delete("/saved-prompts/{saved_prompt_id}")
+def delete_saved_prompt(
+    saved_prompt_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """현재 사용자의 저장 프롬프트를 삭제한다."""
+    saved_prompt = db.scalar(
+        select(SavedPrompt).where(
+            SavedPrompt.id == saved_prompt_id,
+            SavedPrompt.user_id == current_user.id,
+        )
+    )
+    if saved_prompt is None:
+        raise HTTPException(status_code=404, detail="저장된 프롬프트를 찾을 수 없습니다.")
+
+    db.delete(saved_prompt)
+    db.commit()
+    return {"detail": "저장된 프롬프트를 삭제했습니다."}

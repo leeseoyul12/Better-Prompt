@@ -52,12 +52,24 @@ class Settings:
     gemini_retry_attempts: int = _parse_int_env("GEMINI_RETRY_ATTEMPTS", 1)
     gemini_max_output_tokens: int = _parse_int_env("GEMINI_MAX_OUTPUT_TOKENS", 512)
     max_prompt_length: int = _parse_int_env("BETTER_PROMPT_MAX_PROMPT_LENGTH", 2000)
+    saved_prompt_max_length: int = _parse_int_env(
+        "BETTER_PROMPT_SAVED_PROMPT_MAX_LENGTH", 6000
+    )
     rate_limit_max_requests: int = _parse_int_env(
         "BETTER_PROMPT_RATE_LIMIT_MAX_REQUESTS", 10
     )
     rate_limit_window_seconds: int = _parse_int_env(
         "BETTER_PROMPT_RATE_LIMIT_WINDOW_SECONDS", 60
     )
+    database_url: str = os.getenv(
+        "BETTER_PROMPT_DATABASE_URL",
+        "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/better_prompt",
+    ).strip()
+    session_duration_days: int = _parse_int_env("BETTER_PROMPT_SESSION_DURATION_DAYS", 14)
+    google_userinfo_url: str = os.getenv(
+        "BETTER_PROMPT_GOOGLE_USERINFO_URL",
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+    ).strip()
     cors_allowed_origins: Tuple[str, ...] = _parse_csv_env(
         "BETTER_PROMPT_ALLOWED_ORIGINS",
         "https://chatgpt.com,https://chat.openai.com",

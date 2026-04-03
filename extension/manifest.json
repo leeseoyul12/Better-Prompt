@@ -1,8 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Better Prompt",
-  "version": "0.1.0",
-  "description": "AI 프롬프트를 한 번의 클릭으로 더 명확하고 구체적으로 개선해주는 확장 프로그램입니다.",
+  "version": "0.2.0",
+  "description": "AI 프롬프트를 클릭 한 번으로 더 명확하고 구체적으로 개선해주는 확장 프로그램입니다.",
+  "permissions": [
+    "storage",
+    "identity"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
