@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-try:
-    from .config import settings
-except ImportError:
-    from config import settings
+from .config import settings
+
+
+logger = logging.getLogger("better_prompt.database")
+SQLITE_FALLBACK_URL = "sqlite:///./backend/better_prompt.sqlite3"
 
 
 class Base(DeclarativeBase):
@@ -83,7 +85,29 @@ def _build_engine_kwargs(database_url: str) -> dict[str, Any]:
     return kwargs
 
 
-engine = create_engine(settings.database_url, **_build_engine_kwargs(settings.database_url))
+def _create_database_engine():
+    database_url = settings.database_url
+    try:
+        engine = create_engine(database_url, **_build_engine_kwargs(database_url))
+        if database_url.startswith("postgresql"):
+            with engine.connect() as connection:
+                connection.close()
+        return engine
+    except Exception:
+        if database_url.startswith("postgresql"):
+            logger.warning(
+                "postgres_driver_unavailable fallback_url=%s sqlite_url=%s",
+                database_url,
+                SQLITE_FALLBACK_URL,
+            )
+            return create_engine(
+                SQLITE_FALLBACK_URL,
+                **_build_engine_kwargs(SQLITE_FALLBACK_URL),
+            )
+        raise
+
+
+engine = _create_database_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 

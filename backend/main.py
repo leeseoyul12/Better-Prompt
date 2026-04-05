@@ -13,36 +13,20 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-try:
-    from .auth import (
-        AuthenticationError,
-        authenticate_google_access_token,
-        get_user_for_session_token,
-        revoke_session_token,
-    )
-    from .config import settings
-    from .database import SavedPrompt, SessionLocal, User, init_database
-    from .providers import (
-        GeminiPromptProvider,
-        PromptAnalysisProvider,
-        ProviderConfigError,
-        ProviderRequestError,
-    )
-except ImportError:
-    from auth import (
-        AuthenticationError,
-        authenticate_google_access_token,
-        get_user_for_session_token,
-        revoke_session_token,
-    )
-    from config import settings
-    from database import SavedPrompt, SessionLocal, User, init_database
-    from providers import (
-        GeminiPromptProvider,
-        PromptAnalysisProvider,
-        ProviderConfigError,
-        ProviderRequestError,
-    )
+from .auth import (
+    AuthenticationError,
+    authenticate_google_access_token,
+    get_user_for_session_token,
+    revoke_session_token,
+)
+from .config import settings
+from .database import SavedPrompt, SessionLocal, User, init_database
+from .providers import (
+    OpenAIPromptProvider,
+    PromptAnalysisProvider,
+    ProviderConfigError,
+    ProviderRequestError,
+)
 
 
 logger = logging.getLogger("better_prompt.api")
@@ -169,7 +153,7 @@ def localize_provider_error(message: str) -> str:
         return "AI 사용량이 초과됐습니다. 잠시 후 다시 시도해 주세요."
 
     if "http 404" in lowered and "model" in lowered:
-        return "선택한 Gemini 모델을 사용할 수 없습니다. .env의 GEMINI_MODEL 값을 확인해 주세요."
+        return "선택한 OpenAI 모델을 사용할 수 없습니다. .env의 OPENAI_MODEL 값을 확인해 주세요."
 
     if "timeout" in lowered or "timed out" in lowered:
         return "AI 응답이 너무 느립니다. 잠시 후 다시 시도해 주세요."
@@ -182,14 +166,14 @@ def localize_provider_error(message: str) -> str:
 
 def get_provider() -> PromptAnalysisProvider:
     """설정된 provider 구현체를 반환한다."""
-    if settings.provider == "gemini":
-        return GeminiPromptProvider(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
-            api_base=settings.gemini_api_base,
-            timeout_seconds=settings.gemini_timeout_seconds,
-            retry_attempts=settings.gemini_retry_attempts,
-            max_output_tokens=settings.gemini_max_output_tokens,
+    if settings.provider == "openai":
+        return OpenAIPromptProvider(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            api_base=settings.openai_api_base,
+            timeout_seconds=settings.openai_timeout_seconds,
+            retry_attempts=settings.openai_retry_attempts,
+            max_output_tokens=settings.openai_max_output_tokens,
         )
 
     raise ProviderConfigError(
@@ -382,8 +366,8 @@ def improve_prompt(request: Request, payload: ImproveRequest) -> ImproveResponse
         return ImproveResponse(**result)
     except ProviderConfigError as exc:
         raw_message = str(exc)
-        if "GEMINI_API_KEY is missing" in raw_message:
-            detail = "GEMINI_API_KEY가 설정되지 않았습니다. backend/.env 파일을 확인해 주세요."
+        if "OPENAI_API_KEY is missing" in raw_message:
+            detail = "OPENAI_API_KEY가 설정되지 않았습니다. backend/.env 파일을 확인해 주세요."
         else:
             detail = "AI Provider 설정에 문제가 있습니다. 설정값을 확인해 주세요."
         raise HTTPException(status_code=500, detail=detail) from exc

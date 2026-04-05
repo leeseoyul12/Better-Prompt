@@ -72,9 +72,23 @@
   margin-bottom: 12px;
 }
 
+.better-prompt-header-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .better-prompt-popup-header h3 {
   margin: 0;
   font-size: 18px;
+}
+
+.better-prompt-header-notice {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #6b7280;
 }
 
 .better-prompt-close-button {

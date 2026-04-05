@@ -40,17 +40,17 @@ class Settings:
     # provider 이름은 새 이름을 우선 사용하고, 예전 이름도 함께 허용한다.
     provider: str = os.getenv(
         "BETTER_PROMPT_PROVIDER",
-        os.getenv("PROMPT_COACH_PROVIDER", "gemini"),
+        os.getenv("PROMPT_COACH_PROVIDER", "openai"),
     ).strip().lower()
-    # Google AI Studio?쒖꽌 諛쒓툒??API Key濡?Gemini Developer API瑜??몄텧?쒕떎.
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    gemini_api_base: str = os.getenv(
-        "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta"
+    # OpenAI Responses API를 호출하는 데 필요한 기본 설정이다.
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini").strip()
+    openai_api_base: str = os.getenv(
+        "OPENAI_API_BASE", "https://api.openai.com/v1"
     ).strip()
-    gemini_timeout_seconds: float = _parse_float_env("GEMINI_TIMEOUT_SECONDS", 20.0)
-    gemini_retry_attempts: int = _parse_int_env("GEMINI_RETRY_ATTEMPTS", 1)
-    gemini_max_output_tokens: int = _parse_int_env("GEMINI_MAX_OUTPUT_TOKENS", 512)
+    openai_timeout_seconds: float = _parse_float_env("OPENAI_TIMEOUT_SECONDS", 20.0)
+    openai_retry_attempts: int = _parse_int_env("OPENAI_RETRY_ATTEMPTS", 1)
+    openai_max_output_tokens: int = _parse_int_env("OPENAI_MAX_OUTPUT_TOKENS", 1024)
     max_prompt_length: int = _parse_int_env("BETTER_PROMPT_MAX_PROMPT_LENGTH", 2000)
     saved_prompt_max_length: int = _parse_int_env(
         "BETTER_PROMPT_SAVED_PROMPT_MAX_LENGTH", 6000

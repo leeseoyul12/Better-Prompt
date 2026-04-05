@@ -9,12 +9,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-try:
-    from .config import settings
-    from .database import User, UserSession, utcnow
-except ImportError:
-    from config import settings
-    from database import User, UserSession, utcnow
+from .config import settings
+from .database import User, UserSession, utcnow
 
 
 class AuthenticationError(RuntimeError):
