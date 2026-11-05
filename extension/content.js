@@ -5,8 +5,8 @@ const BETTER_PROMPT_AUTH_STORAGE_KEY = "betterPromptAuth";
 
 const BETTER_PROMPT_EMPTY_PROMPT_MESSAGE = "입력된 프롬프트가 없습니다.";
 const BETTER_PROMPT_STALE_PROMPT_MESSAGE = "프롬프트가 바뀌었습니다. 다시 분석해 주세요.";
-const BETTER_PROMPT_MIN_GUIDE_LENGTH = 15;
-const BETTER_PROMPT_REQUEST_TIMEOUT_MS = 15000;
+const BETTER_PROMPT_PREPARE_TIMEOUT_MS = 75000;
+const BETTER_PROMPT_REQUEST_TIMEOUT_MS = 70000;
 
 const BETTER_PROMPT_RUNTIME_CONFIG =
   typeof BETTER_PROMPT_CONFIG !== "undefined"
@@ -21,6 +21,7 @@ const BETTER_PROMPT_RUNTIME_CONFIG =
 let activeAnalysisRequestId = 0;
 let isRequestInFlight = false;
 let activeAnalysisSession = null;
+let activeAnalysisController = null;
 let authState = {
   sessionToken: "",
   user: null
@@ -170,20 +171,6 @@ function getPromptText(inputElement) {
     (inputElement.textContent || "").trim());
 }
 
-function normalizePromptText(text) {
-  return String(text || "").trim().replace(/\s+/g, " ");
-}
-
-function isShortPrompt(text) {
-  return normalizePromptText(text).length > 0 &&
-    normalizePromptText(text).length <= BETTER_PROMPT_MIN_GUIDE_LENGTH;
-}
-
-function shouldGuideForShortPrompt(text) {
-  const normalized = normalizePromptText(text);
-  return normalized.length > 0 && normalized.length <= BETTER_PROMPT_MIN_GUIDE_LENGTH;
-}
-
 function setContentEditableText(element, nextValue) {
   element.focus();
   element.replaceChildren(document.createTextNode(nextValue));
@@ -291,46 +278,86 @@ function normalizeFetchError(response, fallbackMessage) {
   });
 }
 
-function requestPromptImprovement(promptText) {
-  const controller = typeof AbortController === "function" ? new AbortController() : null;
-  const timeoutId = controller
-    ? window.setTimeout(function() {
-        controller.abort();
-      }, BETTER_PROMPT_REQUEST_TIMEOUT_MS)
-    : 0;
-
-  return fetch(getImproveApiUrl(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    signal: controller ? controller.signal : undefined,
-    body: JSON.stringify({
-      prompt: promptText
-    })
-  }).then(function(response) {
-    if (timeoutId) {
-      window.clearTimeout(timeoutId);
-    }
-
+async function fetchJsonWithTimeout(url, options, timeoutMs, timeoutMessage, signal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const cancel = function() { controller.abort(); };
+  if (signal) {
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) { cancel(); }
+  }
+  const timeoutId = window.setTimeout(function() {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
     if (!response.ok) {
-      return normalizeFetchError(response).then(function(detail) {
-        throw new Error(detail);
-      });
+      throw new Error(await normalizeFetchError(response, "서버에 연결할 수 없습니다. 다시 시도해 주세요."));
     }
-
-    return response.json();
-  }).catch(function(error) {
-    if (timeoutId) {
-      window.clearTimeout(timeoutId);
+    // Keep the deadline while reading the body, not just until headers arrive.
+    try {
+      return await response.json();
+    } catch (error) {
+      if (error && error.name === "AbortError") { throw error; }
+      throw new Error("서버 응답을 읽을 수 없습니다. 다시 시도해 주세요.");
     }
-
-    if (error && error.name === "AbortError") {
-      throw new Error("AI 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해 주세요.");
+  } catch (error) {
+    if (timedOut) { throw new Error(timeoutMessage); }
+    if (error && error.name === "TypeError") {
+      throw new Error("서버에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.");
     }
-
     throw error;
-  });
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (signal) { signal.removeEventListener("abort", cancel); }
+  }
+}
+
+function validateImprovementResult(result) {
+  if (!result || !Array.isArray(result.issues) || result.issues.length > 3 ||
+      typeof result.improved_prompt !== "string" || !result.improved_prompt.trim() ||
+      !result.issues.every(function(issue) {
+        return issue && typeof issue.type === "string" && issue.type.trim() &&
+          typeof issue.description === "string" && issue.description.trim();
+      })) {
+    throw new Error("개선 결과의 형식이 올바르지 않습니다. 원문을 유지하고 다시 시도해 주세요.");
+  }
+  return result;
+}
+
+async function requestPromptImprovement(promptText, options) {
+  const settings = options || {};
+  if (settings.signal && settings.signal.aborted) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
+  const onStage = settings.onStage || function() {};
+  onStage("preparing");
+  const health = await fetchJsonWithTimeout(
+    buildApiUrl("/health"), { method: "GET", cache: "no-store" },
+    BETTER_PROMPT_PREPARE_TIMEOUT_MS,
+    "서버 준비가 지연되고 있습니다. AI 개선 요청은 보내지 않았습니다. 잠시 후 다시 시도해 주세요.",
+    settings.signal
+  );
+  if (!health || health.status !== "ok") {
+    throw new Error("서버가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+  }
+  if (settings.signal && settings.signal.aborted) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
+  onStage("analyzing");
+  const headers = { "Content-Type": "application/json" };
+  if (authState.sessionToken) {
+    headers.Authorization = "Bearer " + authState.sessionToken;
+  }
+  const result = await fetchJsonWithTimeout(getImproveApiUrl(), {
+    method: "POST",
+    headers: headers,
+    body: JSON.stringify({ prompt: promptText })
+  }, BETTER_PROMPT_REQUEST_TIMEOUT_MS,
+  "AI 응답 대기 시간이 지났습니다. 원문은 유지됐습니다. 서버에서는 처리가 계속될 수 있으니 잠시 후 다시 시도해 주세요.",
+  settings.signal);
+  return validateImprovementResult(result);
 }
 
 function requestAuthorizedJson(path, options) {
@@ -566,11 +593,13 @@ function renderMessageBlock(resultsContainer, titleText, message, blockClass) {
   resultsContainer.appendChild(section);
 }
 
-function renderLoadingState(resultsContainer) {
+function renderLoadingState(resultsContainer, stage) {
   renderMessageBlock(
     resultsContainer,
     "분석 결과",
-    "프롬프트를 분석하고 있습니다...",
+    stage === "preparing"
+      ? "서버에 연결하고 있습니다. 첫 연결은 최대 75초 걸릴 수 있어요. 취소하면 원문이 유지돼요."
+      : "프롬프트를 개선하고 있습니다. 취소해도 원문은 유지돼요.",
     "better-prompt-status"
   );
 }
@@ -610,9 +639,7 @@ function renderNoIssuesMessage(resultsContainer, improvedPrompt, originalPrompt)
   const resultSection = createPopupSection("분석 결과");
   const resultBlock = document.createElement("div");
   resultBlock.className = "better-prompt-status";
-  resultBlock.textContent = isShortPrompt(originalPrompt)
-    ? "짧은 인사말은 크게 개선되지 않을 수 있습니다."
-    : "충분히 좋은 프롬프트입니다.";
+  resultBlock.textContent = "추가 수정 제안이 없습니다. 원문과 비교해서 사용할지 결정해 주세요.";
   resultSection.appendChild(resultBlock);
 
   const improvedPromptSection = createPopupSection("추천 프롬프트");
@@ -677,6 +704,10 @@ function invalidateCurrentSession() {
   activeAnalysisSession = null;
   activeAnalysisRequestId += 1;
   isRequestInFlight = false;
+  if (activeAnalysisController) {
+    activeAnalysisController.abort();
+    activeAnalysisController = null;
+  }
   setTriggerButtonBusy(false);
 }
 
@@ -703,7 +734,7 @@ function createBetterPromptPopup(currentPrompt) {
 
   const titleNotice = document.createElement("p");
   titleNotice.className = "better-prompt-header-notice";
-  titleNotice.textContent = "입력이 불명확하면 결과 품질이 저하될 수 있습니다.";
+  titleNotice.textContent = "테스트 버전입니다. 초대받은 Google 계정으로 로그인해 주세요.";
 
   const closeButton = createButton("✕", "better-prompt-close-button");
   closeButton.setAttribute("aria-label", "닫기");
@@ -736,6 +767,7 @@ function createBetterPromptPopup(currentPrompt) {
 
   const resultsContainer = document.createElement("div");
   resultsContainer.className = "better-prompt-results";
+  resultsContainer.setAttribute("aria-live", "polite");
 
   const actions = document.createElement("div");
   actions.className = "better-prompt-popup-actions";
@@ -808,6 +840,7 @@ function createBetterPromptPopup(currentPrompt) {
     popup: popup,
     resultsContainer: resultsContainer,
     applyButton: applyButton,
+    keepButton: keepButton,
     authStatus: authStatus,
     loginButton: loginButton,
     logoutButton: logoutButton,
@@ -1135,7 +1168,6 @@ function handleBetterPromptClick(inputElement) {
   }
 
   const promptText = getPromptText(inputElement);
-  console.log("[Better Prompt] Current prompt:", promptText);
 
   const popupParts = createBetterPromptPopup(promptText);
   hydratePopupAuthState(popupParts);
@@ -1143,15 +1175,6 @@ function handleBetterPromptClick(inputElement) {
   if (!promptText) {
     activeAnalysisSession = null;
     renderNoticeState(popupParts.resultsContainer, "프롬프트를 먼저 입력해 주세요.");
-    return;
-  }
-
-  if (shouldGuideForShortPrompt(promptText)) {
-    activeAnalysisSession = null;
-    renderNoticeState(
-      popupParts.resultsContainer,
-      "짧은 입력은 크게 개선되지 않을 수 있습니다. 15자 이상으로 써 주세요."
-    );
     return;
   }
 
@@ -1166,10 +1189,18 @@ function handleBetterPromptClick(inputElement) {
   };
 
   isRequestInFlight = true;
+  activeAnalysisController = new AbortController();
+  popupParts.keepButton.textContent = "취소";
   setTriggerButtonBusy(true);
-  renderLoadingState(popupParts.resultsContainer);
 
-  requestPromptImprovement(promptText).then(function(analysisResult) {
+  requestPromptImprovement(promptText, {
+    signal: activeAnalysisController.signal,
+    onStage: function(stage) {
+      if (getCurrentSession(requestId)) {
+        renderLoadingState(popupParts.resultsContainer, stage);
+      }
+    }
+  }).then(function(analysisResult) {
     const currentSession = getCurrentSession(requestId);
 
     if (!currentSession || !currentSession.popupParts.resultsContainer.isConnected) {
@@ -1182,7 +1213,8 @@ function handleBetterPromptClick(inputElement) {
       analysisResult,
       currentSession.promptSnapshot
     );
-    currentSession.popupParts.applyButton.disabled = false;
+    currentSession.popupParts.applyButton.disabled =
+      analysisResult.improved_prompt === currentSession.promptSnapshot;
     currentSession.popupParts.applyButton.addEventListener(
       "click",
       function() {
@@ -1194,6 +1226,7 @@ function handleBetterPromptClick(inputElement) {
 
         const currentPrompt = getPromptText(latestSession.inputElement);
         if (currentPrompt !== latestSession.promptSnapshot) {
+          latestSession.popupParts.applyButton.disabled = true;
           renderNoticeState(
             latestSession.popupParts.resultsContainer,
             BETTER_PROMPT_STALE_PROMPT_MESSAGE
@@ -1224,9 +1257,18 @@ function handleBetterPromptClick(inputElement) {
       currentSession.popupParts.resultsContainer,
       error instanceof Error ? error.message : "백엔드 서버에 연결할 수 없습니다."
     );
+    const retryButton = createButton("다시 시도", "better-prompt-secondary-button", "retry");
+    retryButton.addEventListener("click", function() {
+      const input = currentSession.inputElement;
+      dismissActiveSession();
+      handleBetterPromptClick(input);
+    });
+    currentSession.popupParts.resultsContainer.appendChild(retryButton);
   }).then(function() {
     if (getCurrentSession(requestId)) {
       isRequestInFlight = false;
+      activeAnalysisController = null;
+      popupParts.keepButton.textContent = "유지하기";
       setTriggerButtonBusy(false);
     }
   });

@@ -12,7 +12,7 @@ if SITE_PACKAGES.exists():
 
 sys.path.insert(0, str(ROOT_DIR))
 
-from backend.providers import OpenAIPromptProvider, ProviderConfigError
+from backend.providers import OpenAIPromptProvider, ProviderConfigError, ProviderRequestError
 
 
 def _mock_openai_response(text: str) -> Mock:
@@ -73,7 +73,7 @@ class OpenAIProviderTests(unittest.TestCase):
         with self.assertRaises(ProviderConfigError):
             provider.analyze_prompt("초안 프롬프트")
 
-    def test_openai_provider_falls_back_when_model_answers_instead_of_rewriting(self):
+    def test_openai_provider_rejects_answer_instead_of_rewriting(self):
         provider = OpenAIPromptProvider(
             api_key="test-api-key",
             model="gpt-5-mini",
@@ -86,9 +86,8 @@ class OpenAIProviderTests(unittest.TestCase):
         )
 
         with patch("backend.providers.httpx.post", return_value=response):
-            result = provider.analyze_prompt("넌 뭐하는 ai냐")
-
-        self.assertEqual(result["improved_prompt"], "넌 뭐하는 ai냐?")
+            with self.assertRaises(ProviderRequestError):
+                provider.analyze_prompt("넌 뭐하는 ai냐")
 
     def test_openai_provider_keeps_short_greeting_minimal_without_api_call(self):
         provider = OpenAIPromptProvider(
@@ -104,7 +103,7 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertEqual(result["improved_prompt"], "안녕")
         mocked_post.assert_not_called()
 
-    def test_openai_provider_returns_local_fallback_when_model_breaks_json(self):
+    def test_openai_provider_reports_failure_when_model_breaks_json(self):
         provider = OpenAIPromptProvider(
             api_key="test-api-key",
             model="gpt-5-mini",
@@ -117,16 +116,16 @@ class OpenAIProviderTests(unittest.TestCase):
         )
 
         with patch("backend.providers.httpx.post", return_value=response):
-            result = provider.analyze_prompt("자바 공부 어떻게 해?")
-
-        self.assertIn("단계별로 알려줘", result["improved_prompt"])
-        self.assertEqual(result["issues"], [])
+            with self.assertRaises(ProviderRequestError):
+                provider.analyze_prompt("자바 공부 어떻게 해?")
 
     def test_env_example_uses_openai_defaults(self):
         env_example = (ROOT_DIR / "backend" / ".env.example").read_text(encoding="utf-8")
 
         self.assertIn("BETTER_PROMPT_PROVIDER=openai", env_example)
         self.assertIn("OPENAI_MODEL=gpt-5-mini", env_example)
+        self.assertIn("OPENAI_TIMEOUT_SECONDS=20", env_example)
+        self.assertIn("OPENAI_RETRY_ATTEMPTS=0", env_example)
         self.assertIn("OPENAI_API_BASE=https://api.openai.com/v1", env_example)
         self.assertIn("BETTER_PROMPT_DATABASE_URL=", env_example)
         self.assertIn("BETTER_PROMPT_SESSION_DURATION_DAYS=14", env_example)

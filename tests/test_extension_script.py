@@ -34,8 +34,15 @@ class ExtensionScriptTests(unittest.TestCase):
         source = CONFIG_JS_PATH.read_text(encoding="utf-8")
         self.assertIn('apiUrl: "https://', source)
         self.assertIn('/improve"', source)
-        self.assertIn('googleClientId: "YOUR_GOOGLE_CLIENT_ID', source)
         _assert_valid_javascript(self, source)
+        result = subprocess.run(
+            ["node", "-e", source + "\nconsole.log(JSON.stringify(BETTER_PROMPT_CONFIG));"],
+            text=True, encoding="utf-8", capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads(result.stdout)
+        self.assertEqual(config["apiUrl"], config["apiBaseUrl"].rstrip("/") + "/improve")
+        self.assertRegex(config["googleClientId"], r"^[\w-]+\.apps\.googleusercontent\.com$")
 
     def test_content_script_is_valid_javascript(self):
         source = CONTENT_JS_PATH.read_text(encoding="utf-8")

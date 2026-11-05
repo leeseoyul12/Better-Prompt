@@ -1,5 +1,7 @@
 import json
 import logging
+import math
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Protocol
@@ -8,20 +10,6 @@ import httpx
 
 
 logger = logging.getLogger("better_prompt.provider")
-
-ANSWER_PREFIXES = (
-    "안녕하세요",
-    "무엇을 도와",
-    "도와드릴",
-    "저는 ",
-    "제가 ",
-    "알겠습니다",
-    "좋습니다",
-    "물론",
-    "다음은",
-    "아래는",
-)
-
 
 class ProviderConfigError(RuntimeError):
     """필수 provider 설정이 없을 때 사용한다."""
@@ -97,103 +85,44 @@ def _extract_text_from_openai(payload: Dict[str, Any]) -> str:
     return "\n".join(text_parts).strip()
 
 
-def _minimal_prompt_rewrite(prompt: str) -> str:
-    normalized = _normalize_space(prompt)
-    if not normalized:
-        return ""
-
-    if normalized[-1] in ".!?":
-        return normalized
-
-    return normalized
-
-
 def _looks_like_direct_answer(original_prompt: str, candidate: str) -> bool:
-    normalized_candidate = _normalize_space(candidate)
-    if not normalized_candidate:
+    # Conservative heuristic, not a semantic guarantee. Preserve first-person
+    # context such as "저는 학생입니다" and text already present in the input.
+    text = _normalize_space(candidate)
+    if text == _normalize_space(original_prompt):
         return False
-
-    lowered_candidate = normalized_candidate.lower()
-    if any(lowered_candidate.startswith(prefix) for prefix in ANSWER_PREFIXES):
-        return True
-
-    if lowered_candidate.startswith("저는 ") or "대규모 언어 모델" in normalized_candidate:
-        return True
-
-    if "무엇을 도와" in normalized_candidate or "도와드릴" in normalized_candidate:
-        return True
-
-    return False
+    return bool(re.search(
+        r"^(?:(?:저는|나는)\s[^.!?]*?(?:AI|인공지능|언어 모델|ChatGPT)\s*(?:입니다|이에요)|"
+        r"무엇을 도와드릴|정답은\s|(?:I am|I'm|As) an? (?:AI(?: assistant)?|language model)(?:[.,!?]|$))",
+        text, re.IGNORECASE,
+    ))
 
 
-def _looks_like_direct_answer(original_prompt: str, candidate: str) -> bool:
-    return False
-
-
-def _is_over_expanded(original_prompt: str, candidate: str) -> bool:
-    normalized_original = _normalize_space(original_prompt)
-    normalized_candidate = _normalize_space(candidate)
-
-    if not normalized_original or not normalized_candidate:
-        return False
-
-    original_length = len(normalized_original)
-    candidate_length = len(normalized_candidate)
-
-    if candidate_length > max(original_length * 2, original_length + 40):
-        return True
-
-    if original_length <= 12 and ("\n" in candidate or candidate_length > max(original_length + 8, 24)):
-        return True
-
-    return False
-
-
-def _sanitize_issues(raw_issues: Any) -> List[Dict[str, str]]:
-    if not isinstance(raw_issues, list):
-        return []
-
-    sanitized: List[Dict[str, str]] = []
-    for issue in raw_issues[:3]:
-        if not isinstance(issue, dict):
-            continue
-
-        issue_type = _normalize_space(issue.get("type", ""))
-        description = _normalize_space(issue.get("description", ""))
-        if not issue_type or not description:
-            continue
-
-        sanitized.append({"type": issue_type[:60], "description": description[:200]})
-
-    return sanitized
-
-
-def _build_fallback_analysis(prompt: str) -> Dict[str, Any]:
-    improved_prompt = _minimal_prompt_rewrite(prompt)
-
-    return {
-        "issues": [],
-        "improved_prompt": improved_prompt or _normalize_space(prompt),
-    }
-
-
-def _sanitize_analysis_result(prompt: str, parsed: Dict[str, Any]) -> Dict[str, Any]:
-    issues = _sanitize_issues(parsed.get("issues"))
-    improved_prompt = _normalize_space(parsed.get("improved_prompt", ""))
-
-    if not improved_prompt:
-        improved_prompt = _build_fallback_analysis(prompt)["improved_prompt"]
-
-    if _looks_like_direct_answer(prompt, improved_prompt):
-        return _build_fallback_analysis(prompt)
-
-    if not improved_prompt:
-        improved_prompt = _normalize_space(prompt)
-
-    return {
-        "issues": issues,
-        "improved_prompt": improved_prompt,
-    }
+def _validate_analysis_result(prompt: str, parsed: Any) -> Dict[str, Any]:
+    if not isinstance(parsed, dict):
+        raise ProviderRequestError("Invalid analysis JSON root.")
+    raw_issues = parsed.get("issues")
+    improved = parsed.get("improved_prompt")
+    if not isinstance(raw_issues, list) or len(raw_issues) > 3:
+        raise ProviderRequestError("Invalid analysis issues.")
+    if not isinstance(improved, str) or not improved.strip():
+        raise ProviderRequestError("Invalid improved prompt.")
+    issues = []
+    for issue in raw_issues:
+        if not isinstance(issue, dict) or not all(
+            isinstance(issue.get(key), str) and issue[key].strip()
+            for key in ("type", "description")
+        ):
+            raise ProviderRequestError("Invalid analysis issue fields.")
+        issue_type = _normalize_space(issue["type"])
+        description = _normalize_space(issue["description"])
+        if len(issue_type) > 60 or len(description) > 200:
+            raise ProviderRequestError("Analysis issue exceeds limit.")
+        issues.append({"type": issue_type, "description": description})
+    if _looks_like_direct_answer(prompt, improved):
+        raise ProviderRequestError("AI returned an answer instead of a rewritten prompt.")
+    # Preserve lists, code blocks and intentional whitespace in the user's prompt.
+    return {"issues": issues, "improved_prompt": improved.strip()}
 
 
 def _build_response_schema() -> Dict[str, Any]:
@@ -293,7 +222,7 @@ class OpenAIPromptProvider:
     model: str
     api_base: str
     timeout_seconds: float = 20.0
-    retry_attempts: int = 1
+    retry_attempts: int = 0
     max_output_tokens: int = 1024
 
     def _build_payload(self, prompt: str, strict_retry: bool = False) -> Dict[str, Any]:
@@ -313,17 +242,24 @@ class OpenAIPromptProvider:
         }
 
     def analyze_prompt(self, prompt: str) -> Dict[str, Any]:
+        if not prompt.strip():
+            raise ProviderRequestError("Prompt must not be blank.")
+        if prompt.strip().lower().rstrip(".!?~！。？") in {
+            "안녕", "안녕하세요", "ㅎㅇ", "하이", "hello", "hi", "hey",
+        }:
+            return {"issues": [], "improved_prompt": prompt.strip()}
         if not self.api_key:
             raise ProviderConfigError(
                 "OPENAI_API_KEY is missing. Add it to your .env file."
             )
 
-        fallback_result = _build_fallback_analysis(prompt)
-
         endpoint = f"{self.api_base.rstrip('/')}/responses"
-        last_error: Exception | None = None
-
-        for attempt in range(self.retry_attempts + 1):
+        # Bound even a stale deployment's OPENAI_RETRY_ATTEMPTS=10. Do not
+        # retry ambiguous network timeouts or invalid model output automatically.
+        retry_attempts = min(1, max(0, self.retry_attempts))
+        timeout = self.timeout_seconds if math.isfinite(self.timeout_seconds) else 20.0
+        timeout = min(30.0, max(1.0, timeout))
+        for attempt in range(retry_attempts + 1):
             strict_retry = attempt > 0
             payload = self._build_payload(prompt, strict_retry=strict_retry)
 
@@ -335,92 +271,41 @@ class OpenAIPromptProvider:
                         "Content-Type": "application/json",
                     },
                     json=payload,
-                    timeout=self.timeout_seconds,
+                    timeout=timeout,
                 )
                 response.raise_for_status()
 
                 try:
                     response_payload = response.json()
                 except ValueError as exc:
-                    last_error = exc
-                    if attempt < self.retry_attempts:
-                        time.sleep(min(0.3 * (attempt + 1), 1.0))
-                        continue
-                    logger.warning(
-                        "provider_fallback reason=invalid_response_json prompt=%r",
-                        prompt,
-                    )
-                    return fallback_result
+                    raise ProviderRequestError("Invalid response JSON.") from exc
+
+                if not isinstance(response_payload, dict):
+                    raise ProviderRequestError("Invalid provider response root.")
+                if response_payload.get("status", "completed") != "completed":
+                    raise ProviderRequestError("AI response was not completed.")
 
                 raw_text = _extract_text_from_openai(response_payload)
                 if not raw_text:
-                    last_error = ProviderRequestError(
+                    raise ProviderRequestError(
                         "OpenAI Responses API response did not contain text."
                     )
-                    if attempt < self.retry_attempts:
-                        time.sleep(min(0.3 * (attempt + 1), 1.0))
-                        continue
-                    logger.warning("provider_fallback reason=empty_text prompt=%r", prompt)
-                    return fallback_result
 
                 cleaned_text = _extract_json_candidate(raw_text)
                 try:
                     parsed = json.loads(cleaned_text)
                 except json.JSONDecodeError as exc:
-                    last_error = exc
-                    if attempt < self.retry_attempts:
-                        time.sleep(min(0.3 * (attempt + 1), 1.0))
-                        continue
-                    logger.warning(
-                        "provider_fallback reason=invalid_schema_json prompt=%r raw_text=%r",
-                        prompt,
-                        raw_text[:400],
-                    )
-                    return fallback_result
-
-                if not isinstance(parsed, dict):
-                    last_error = ProviderRequestError(
-                        "OpenAI response JSON root must be an object."
-                    )
-                    if attempt < self.retry_attempts:
-                        time.sleep(min(0.3 * (attempt + 1), 1.0))
-                        continue
-                    logger.warning("provider_fallback reason=json_root prompt=%r", prompt)
-                    return fallback_result
-
-                raw_improved_prompt = str(parsed.get("improved_prompt", "")).strip()
-                if _looks_like_direct_answer(prompt, raw_improved_prompt):
-                    last_error = ProviderRequestError("OpenAI output looked like a direct answer.")
-                    if attempt < self.retry_attempts:
-                        time.sleep(min(0.3 * (attempt + 1), 1.0))
-                        continue
-                    logger.warning("provider_fallback reason=direct_answer prompt=%r", prompt)
-                    return fallback_result
-
-                return _sanitize_analysis_result(prompt, parsed)
+                    raise ProviderRequestError("Invalid analysis JSON.") from exc
+                return _validate_analysis_result(prompt, parsed)
             except httpx.HTTPStatusError as exc:
-                last_error = exc
-                if _is_retryable_status(exc.response.status_code) and attempt < self.retry_attempts:
+                if _is_retryable_status(exc.response.status_code) and attempt < retry_attempts:
                     time.sleep(min(0.5 * (attempt + 1), 1.5))
                     continue
 
-                logger.warning(
-                    "provider_fallback reason=http_status status=%s prompt=%r body=%r",
-                    exc.response.status_code,
-                    prompt,
-                    exc.response.text[:200],
-                )
-                return fallback_result
+                logger.warning("provider_failed status=%s", exc.response.status_code)
+                raise ProviderRequestError(f"OpenAI HTTP {exc.response.status_code}") from exc
             except httpx.RequestError as exc:
-                last_error = exc
-                if attempt < self.retry_attempts:
-                    time.sleep(min(0.5 * (attempt + 1), 1.5))
-                    continue
-
-                logger.warning("provider_fallback reason=request_error prompt=%r", prompt)
-                return fallback_result
-
-        if last_error is not None:
-            logger.warning("provider_fallback reason=unexpected prompt=%r", prompt)
-
-        return fallback_result
+                reason = "timeout" if isinstance(exc, httpx.TimeoutException) else "connection error"
+                logger.warning("provider_failed reason=%s", reason)
+                raise ProviderRequestError(f"OpenAI {reason}") from exc
+        raise ProviderRequestError("AI request failed.")

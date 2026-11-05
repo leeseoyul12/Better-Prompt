@@ -143,3 +143,9 @@ vite.config.ts.timestamp-*
 venv/
 __pycache__/
 *.py[cod]
+
+# Local user/session databases are never source artifacts.
+*.sqlite3
+*.sqlite3-*
+*.db
+verification/

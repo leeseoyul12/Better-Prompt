@@ -9,7 +9,7 @@ from typing import Deque, DefaultDict, List
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -39,6 +39,13 @@ class ImproveRequest(BaseModel):
         max_length=settings.max_prompt_length,
         description=f"Original user prompt (max {settings.max_prompt_length} chars)",
     )
+
+    @field_validator("prompt")
+    @classmethod
+    def reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Prompt must not be blank.")
+        return value
 
 
 class Issue(BaseModel):
@@ -304,6 +311,15 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="로그인 세션이 만료됐습니다.") from exc
 
 
+def get_improve_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.email.casefold() not in settings.improve_allowed_emails:
+        raise HTTPException(
+            status_code=403,
+            detail="현재는 초대된 계정만 개선 기능을 사용할 수 있습니다. 테스트 참여 계정을 확인해 주세요.",
+        )
+    return current_user
+
+
 @app.middleware("http")
 async def request_logging_and_rate_limit(
     request: Request, call_next
@@ -345,8 +361,17 @@ async def request_logging_and_rate_limit(
     return response
 
 
+@app.get("/health")
+def health() -> dict[str, str]:
+    # Checks application readiness only; no model, login or database query.
+    return {"status": "ok"}
+
+
 @app.post("/improve", response_model=ImproveResponse)
-def improve_prompt(request: Request, payload: ImproveRequest) -> ImproveResponse:
+def improve_prompt(
+    request: Request, payload: ImproveRequest,
+    current_user: User = Depends(get_improve_user),
+) -> ImproveResponse:
     """프롬프트를 분석해서 구조화된 개선 결과를 반환한다."""
     try:
         provider = get_provider()
@@ -376,7 +401,7 @@ def improve_prompt(request: Request, payload: ImproveRequest) -> ImproveResponse
             status_code=502, detail=localize_provider_error(str(exc))
         ) from exc
     except ValidationError as exc:
-        logger.warning("invalid_provider_payload error=%s", exc)
+        logger.warning("invalid_provider_payload")
         raise HTTPException(
             status_code=502,
             detail="AI 응답 형식이 올바르지 않습니다. 잠시 후 다시 시도해 주세요.",

@@ -49,7 +49,7 @@ class Settings:
         "OPENAI_API_BASE", "https://api.openai.com/v1"
     ).strip()
     openai_timeout_seconds: float = _parse_float_env("OPENAI_TIMEOUT_SECONDS", 20.0)
-    openai_retry_attempts: int = _parse_int_env("OPENAI_RETRY_ATTEMPTS", 1)
+    openai_retry_attempts: int = _parse_int_env("OPENAI_RETRY_ATTEMPTS", 0)
     openai_max_output_tokens: int = _parse_int_env("OPENAI_MAX_OUTPUT_TOKENS", 1024)
     max_prompt_length: int = _parse_int_env("BETTER_PROMPT_MAX_PROMPT_LENGTH", 2000)
     saved_prompt_max_length: int = _parse_int_env(
@@ -73,6 +73,10 @@ class Settings:
     cors_allowed_origins: Tuple[str, ...] = _parse_csv_env(
         "BETTER_PROMPT_ALLOWED_ORIGINS",
         "https://chatgpt.com,https://chat.openai.com",
+    )
+    # Closed test: no configured accounts means no paid improvements are allowed.
+    improve_allowed_emails: Tuple[str, ...] = tuple(
+        email.casefold() for email in _parse_csv_env("BETTER_PROMPT_ALLOWED_EMAILS", "")
     )
 
 

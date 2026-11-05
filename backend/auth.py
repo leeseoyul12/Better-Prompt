@@ -44,7 +44,12 @@ class GoogleIdentityService:
         except httpx.HTTPError as exc:
             raise AuthenticationError("Google access token verification failed.") from exc
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AuthenticationError("Google profile response was invalid.") from exc
+        if not isinstance(payload, dict) or payload.get("email_verified") is not True:
+            raise AuthenticationError("Google email must be verified.")
         sub = str(payload.get("sub", "")).strip()
         email = str(payload.get("email", "")).strip()
         name = str(payload.get("name", "")).strip() or email or "Google User"

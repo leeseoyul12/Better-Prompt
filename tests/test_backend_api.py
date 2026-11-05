@@ -1,12 +1,15 @@
 import os
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SITE_PACKAGES = ROOT_DIR / "backend" / ".venv" / "Lib" / "site-packages"
-TEST_DB_PATH = ROOT_DIR / "tests" / "test_app.sqlite3"
+_TEST_DB_DIRECTORY = tempfile.TemporaryDirectory(prefix="better-prompt-test-")
+TEST_DB_PATH = Path(_TEST_DB_DIRECTORY.name) / "test_app.sqlite3"
 
 os.environ["BETTER_PROMPT_DATABASE_URL"] = "sqlite:///" + TEST_DB_PATH.as_posix()
 
@@ -19,8 +22,9 @@ from fastapi.testclient import TestClient
 
 from backend.auth import GoogleProfile
 from backend.config import settings
-from backend.database import SavedPrompt, SessionLocal, User, UserSession, init_database
+from backend.database import SavedPrompt, SessionLocal, User, UserSession, engine, init_database
 from backend.main import InMemoryRateLimiter, app
+from backend.providers import OpenAIPromptProvider, ProviderRequestError
 import backend.main as backend_main
 
 
@@ -54,6 +58,9 @@ class ImproveApiTests(unittest.TestCase):
         self.client = TestClient(app)
         self.original_rate_limiter = backend_main._rate_limiter
         backend_main._rate_limiter = InMemoryRateLimiter(max_requests=1, window_seconds=60)
+        # Most tests exercise the existing API behavior independently of the
+        # invite gate; dedicated tests below exercise real session + allowlist.
+        app.dependency_overrides[backend_main.get_improve_user] = lambda: None
 
         with SessionLocal() as db:
             db.query(UserSession).delete()
@@ -62,7 +69,14 @@ class ImproveApiTests(unittest.TestCase):
             db.commit()
 
     def tearDown(self):
+        app.dependency_overrides.clear()
+        self.client.close()
         backend_main._rate_limiter = self.original_rate_limiter
+
+    @classmethod
+    def tearDownClass(cls):
+        engine.dispose()
+        _TEST_DB_DIRECTORY.cleanup()
 
     def _login(self, sub: str, email: str, display_name: str = "Tester") -> str:
         with patch(
@@ -103,6 +117,80 @@ class ImproveApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("detail", response.json())
+
+    def test_health_does_not_call_model_or_query_database(self):
+        with patch("backend.main.get_provider", side_effect=AssertionError("AI called")), patch(
+            "backend.main.SessionLocal", side_effect=AssertionError("Database queried")
+        ):
+            response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_blank_prompt_is_rejected_before_provider_call(self):
+        with patch("backend.main.get_provider") as provider:
+            response = self.client.post("/improve", json={"prompt": " \n\t "})
+        self.assertEqual(response.status_code, 422)
+        provider.assert_not_called()
+
+    def test_real_provider_malformed_model_result_returns_error_not_success(self):
+        from unittest.mock import Mock
+        provider = OpenAIPromptProvider("fake-key", "gpt-5-mini", "https://example.invalid/v1")
+        response = Mock()
+        response.json.return_value = {"output_text": "not JSON"}
+        with patch("backend.main.get_provider", return_value=provider), patch(
+            "backend.providers.httpx.post", return_value=response
+        ) as post:
+            result = self.client.post("/improve", json={"prompt": "작업 요청을 명확하게 바꿔 줘"})
+        self.assertEqual(result.status_code, 502)
+        self.assertIn("detail", result.json())
+        self.assertNotIn("improved_prompt", result.json())
+        post.assert_called_once()
+
+    def test_provider_timeout_becomes_localized_error(self):
+        with patch("backend.main.get_provider") as get_provider:
+            get_provider.return_value.analyze_prompt.side_effect = ProviderRequestError("OpenAI timeout")
+            response = self.client.post("/improve", json={"prompt": "원래 요청"})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("느립니다", response.json()["detail"])
+
+    def test_anonymous_improvement_never_calls_provider(self):
+        app.dependency_overrides.clear()
+        with patch("backend.main.get_provider") as provider:
+            result = self.client.post("/improve", json={"prompt": "이 코드를 설명해 줘"})
+        self.assertEqual(result.status_code, 401)
+        provider.assert_not_called()
+
+    def test_invited_session_can_improve(self):
+        app.dependency_overrides.clear()
+        token = self._login("invited-sub", "invited@example.com")
+        with patch("backend.main.settings", replace(settings, improve_allowed_emails=("invited@example.com",))), patch(
+            "backend.main.get_provider", return_value=_ValidProvider()
+        ):
+            result = self.client.post("/improve", json={"prompt": "이 코드를 설명해 줘"},
+                                      headers={"Authorization": "Bearer " + token})
+        self.assertEqual(result.status_code, 200)
+
+    def test_noninvited_session_never_calls_provider(self):
+        app.dependency_overrides.clear()
+        token = self._login("other-sub", "other@example.com")
+        with patch("backend.main.settings", replace(settings, improve_allowed_emails=("invited@example.com",))), patch(
+            "backend.main.get_provider"
+        ) as provider:
+            result = self.client.post("/improve", json={"prompt": "이 코드를 설명해 줘"},
+                                      headers={"Authorization": "Bearer " + token})
+        self.assertEqual(result.status_code, 403)
+        provider.assert_not_called()
+
+    def test_empty_invite_list_denies_everyone(self):
+        app.dependency_overrides.clear()
+        token = self._login("empty-list-sub", "invited@example.com")
+        with patch("backend.main.settings", replace(settings, improve_allowed_emails=())), patch(
+            "backend.main.get_provider"
+        ) as provider:
+            result = self.client.post("/improve", json={"prompt": "이 코드를 설명해 줘"},
+                                      headers={"Authorization": "Bearer " + token})
+        self.assertEqual(result.status_code, 403)
+        provider.assert_not_called()
 
     def test_improve_rate_limits_repeated_requests(self):
         with patch("backend.main.get_provider", return_value=_ValidProvider()):
