@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, create_engine
+from sqlalchemy import DateTime, ForeignKey, String, Text, create_engine, event
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.pool import QueuePool
 
 from .config import settings
 
@@ -87,6 +91,48 @@ def _build_engine_kwargs(database_url: str) -> dict[str, Any]:
 
 def _create_database_engine():
     database_url = settings.database_url
+    if settings.sqlite_encryption_key or database_url.startswith("sqlite+pysqlcipher:"):
+        url_error = "Use a file-based sqlite+pysqlcipher URL without credentials or options."
+        try:
+            url = make_url(database_url)
+        except ArgumentError:
+            raise RuntimeError(url_error) from None
+        if (
+            url.drivername != "sqlite+pysqlcipher"
+            or url.username is not None
+            or url.password is not None
+            or url.host is not None
+            or url.port is not None
+            or url.query
+            or not url.database
+            or url.database == ":memory:"
+        ):
+            raise RuntimeError(url_error)
+        key = settings.sqlite_encryption_key
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", key):
+            raise RuntimeError("BETTER_PROMPT_SQLITE_ENCRYPTION_KEY must contain 64 hexadecimal characters.")
+
+        from sqlcipher3 import dbapi2
+
+        # SQLAlchemy applies the passphrase to every pooled connection.
+        encrypted_engine = create_engine(
+            url.set(password=key),
+            module=dbapi2,
+            poolclass=QueuePool,
+            hide_parameters=True,
+            **_build_engine_kwargs(database_url),
+        )
+
+        @event.listens_for(encrypted_engine, "connect")
+        def keep_temporary_data_in_memory(connection, _record):
+            cursor = connection.cursor()
+            try:
+                cursor.execute("PRAGMA temp_store = MEMORY")
+            finally:
+                cursor.close()
+
+        return encrypted_engine
+
     try:
         engine = create_engine(database_url, **_build_engine_kwargs(database_url))
         if database_url.startswith("postgresql"):
@@ -95,11 +141,7 @@ def _create_database_engine():
         return engine
     except Exception:
         if database_url.startswith("postgresql"):
-            logger.warning(
-                "postgres_driver_unavailable fallback_url=%s sqlite_url=%s",
-                database_url,
-                SQLITE_FALLBACK_URL,
-            )
+            logger.warning("postgres_driver_unavailable fallback_url=%s", SQLITE_FALLBACK_URL)
             return create_engine(
                 SQLITE_FALLBACK_URL,
                 **_build_engine_kwargs(SQLITE_FALLBACK_URL),

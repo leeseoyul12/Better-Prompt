@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Tuple
 
@@ -65,6 +65,10 @@ class Settings:
         "BETTER_PROMPT_DATABASE_URL",
         "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/better_prompt",
     ).strip()
+    sqlite_encryption_key: str = field(
+        default=os.getenv("BETTER_PROMPT_SQLITE_ENCRYPTION_KEY", "").strip(),
+        repr=False,
+    )
     session_duration_days: int = _parse_int_env("BETTER_PROMPT_SESSION_DURATION_DAYS", 14)
     google_userinfo_url: str = os.getenv(
         "BETTER_PROMPT_GOOGLE_USERINFO_URL",
