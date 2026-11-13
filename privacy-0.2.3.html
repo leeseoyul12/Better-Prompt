@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Better Prompt 개인정보처리방침</title>
+  <style>
+    body { margin: 0; padding: 2.5rem 1.25rem; color: #1c2531; background: #fff; font: 1rem/1.75 system-ui, sans-serif; }
+    main { max-width: 48rem; margin: auto; }
+    h1, h2 { line-height: 1.35; }
+    h2 { margin-top: 2rem; font-size: 1.25rem; }
+    a { color: #124b9f; }
+    .date { color: #505c6c; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Better Prompt 개인정보처리방침</h1>
+    <p class="date">2026년 11월 10일</p>
+    <p>Better Prompt는 ChatGPT에 보낼 문장을 다듬고 다시 쓸 프롬프트를 저장하는 Chrome 확장 프로그램입니다. 아래에서는 Google 로그인, AI 개선 요청과 프롬프트 저장 과정에서 처리하는 정보를 설명합니다.</p>
+
+    <h2>1. 처리하는 정보와 목적</h2>
+    <ul>
+      <li><strong>로그인.</strong> 로그인 버튼을 누르면 Google 인증 화면을 엽니다. 확장 프로그램이 받은 Google 액세스 토큰은 Better Prompt 서버가 로그인과 이메일 인증 여부를 확인하는 데 사용합니다. Google 계정 식별자, 이메일, 표시 이름을 계정 식별과 서비스 세션 관리에 사용합니다.</li>
+      <li><strong>프롬프트 개선.</strong> 로그인한 사용자가 전송 안내를 확인하고 ‘서버로 보내고 개선’을 누르면 ChatGPT 입력창의 작성 중인 텍스트를 서버에 전송합니다. 서버는 사용할 권한을 확인하고, AI 처리가 필요한 요청의 텍스트를 OpenAI API에 보내 개선안과 개선 이유를 받습니다. 확장 프로그램은 사용자가 선택한 개선안을 입력창에 넣습니다.</li>
+      <li><strong>프롬프트 저장.</strong> 사용자가 저장을 선택하면 제목, 본문, 연결된 서비스 계정, 생성·수정 시각을 서버에 보관합니다. 이 정보는 저장 목록 표시, 다시 적용, 편집, 삭제에 사용합니다.</li>
+      <li><strong>서비스 운영.</strong> 접속 IP 또는 요청의 클라이언트 식별 정보, 요청 경로와 방식, 응답 상태, 처리 시간, 개선 요청의 입력 길이 등을 요청 제한과 장애 진단에 사용합니다.</li>
+    </ul>
+    <p>‘예시로 체험’은 로그인 없이 사용할 수 있습니다. 준비된 예시와 개선안을 브라우저에서 표시하며 예시 프롬프트를 Better Prompt 서버나 OpenAI로 전송하지 않습니다. 프롬프트 입력란에는 비밀번호, 인증코드, 금융 정보나 다른 사람의 민감한 정보를 입력하지 마세요.</p>
+
+    <h2>2. 외부 서비스와 데이터 전송</h2>
+    <ul>
+      <li><strong>Google.</strong> 사용자가 Google에서 로그인하면 Better Prompt 서버가 Google 사용자 정보 API에서 액세스 토큰을 확인하고 계정 식별자, 검증된 이메일과 표시 이름을 받습니다. <a href="https://policies.google.com/privacy?hl=ko">Google 개인정보처리방침</a></li>
+      <li><strong>Render.</strong> Better Prompt 서버는 Render의 미국 리전에서 운영합니다. 인증 요청, 개선 요청, 저장 목록 및 서비스 운영 정보는 이 서버에서 처리합니다. <a href="https://render.com/privacy">Render 개인정보처리방침</a></li>
+      <li><strong>OpenAI.</strong> 서버는 AI 개선이 필요한 때에 프롬프트와 개선에 필요한 처리 지시를 OpenAI API로 전송합니다. 이 요청에는 Better Prompt 계정 정보나 로그인 토큰을 별도 항목으로 넣지 않습니다. 프롬프트 본문에 사용자가 작성한 개인정보가 포함되면 해당 내용은 함께 전송됩니다. OpenAI API의 처리와 보관은 OpenAI의 정책 및 적용되는 계정 설정을 따릅니다. <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI API 데이터 관리</a></li>
+    </ul>
+    <p>외부 서비스 이용에 따라 정보가 한국 밖의 서버에서 처리될 수 있습니다. Better Prompt는 처리한 정보를 기능 제공과 운영에 사용합니다. Google API에서 받은 정보는 Chrome 웹스토어 사용자 데이터 정책의 제한적 사용 요구사항에 따라 처리합니다. 광고나 신용 평가 목적으로 사용자 데이터를 제공하거나 판매하지 않습니다. <a href="https://developer.chrome.com/docs/webstore/program-policies/limited-use">Chrome 웹스토어 제한적 사용 정책</a></p>
+
+    <h2>3. 저장과 보관</h2>
+    <ul>
+      <li>확장 프로그램은 로그인 유지에 필요한 서비스 세션 토큰과 표시 이름을 Chrome의 메모리 세션 저장소에 보관합니다. Chrome을 재시작하거나 확장을 다시 로드하면 로그인 정보가 지워집니다. 서버는 서비스 세션 토큰의 해시값과 만료 시각을 관리합니다. 서버 세션은 기본적으로 발급 후 14일 동안 유효합니다.</li>
+      <li>서버는 계정 정보와 사용자가 직접 저장한 프롬프트를 암호화된 데이터베이스에 보관합니다. 개선 요청만으로 작성한 프롬프트가 Better Prompt의 저장 목록에 추가되지는 않습니다. 테스트 서버의 휴면·재시작·재배포로 계정 세션과 저장 목록의 변경이 유실될 수 있습니다.</li>
+      <li>서비스 운영 로그와 외부 처리 기록에는 각 운영 환경의 보관 정책이 적용됩니다. 서비스와의 데이터 전송에는 HTTPS를 사용합니다.</li>
+    </ul>
+
+    <h2>4. 열람·수정·삭제와 문의</h2>
+    <p>확장 프로그램의 저장 목록에서 저장한 프롬프트를 확인하고 편집하거나 삭제할 수 있습니다. 로그아웃을 누르면 확장 프로그램의 로컬 로그인 정보를 지웁니다. 계정 정보의 열람·수정·삭제 또는 데이터 처리 관련 문의는 <a href="mailto:kdltjdbf@gmail.com">kdltjdbf@gmail.com</a>으로 요청할 수 있습니다. 본인 확인을 위해 비밀번호나 인증코드를 이메일로 보내지 마세요.</p>
+  </main>
+</body>
+</html>
