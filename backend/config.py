@@ -78,7 +78,8 @@ class Settings:
         "BETTER_PROMPT_ALLOWED_ORIGINS",
         "https://chatgpt.com,https://chat.openai.com",
     )
-    # Closed test: no configured accounts means no paid improvements are allowed.
+    improve_public_access: bool = os.getenv("BETTER_PROMPT_PUBLIC_IMPROVE", "").strip().lower() == "true"
+    # When public access is disabled, an empty list denies AI improvements.
     improve_allowed_emails: Tuple[str, ...] = tuple(
         email.casefold() for email in _parse_csv_env("BETTER_PROMPT_ALLOWED_EMAILS", "")
     )

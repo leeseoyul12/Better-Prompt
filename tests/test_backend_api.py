@@ -192,6 +192,29 @@ class ImproveApiTests(unittest.TestCase):
         self.assertEqual(result.status_code, 403)
         provider.assert_not_called()
 
+    def test_public_improvement_checks_account_and_service_limits_before_model(self):
+        app.dependency_overrides.clear()
+        first = self._login("public-first", "first@example.com")
+        second = self._login("public-second", "second@example.com")
+        third = self._login("public-third", "third@example.com")
+        with (
+            patch("backend.main.settings", replace(settings, improve_public_access=True)),
+            patch("backend.main._rate_limiter", InMemoryRateLimiter(20, 60)),
+            patch("backend.main._public_user_limiter", InMemoryRateLimiter(1, 3600)),
+            patch("backend.main._public_service_limiter", InMemoryRateLimiter(2, 3600)),
+            patch("backend.main.get_provider", return_value=_ValidProvider()) as provider,
+        ):
+            responses = [
+                self.client.post("/improve", json={"prompt": "회의 안내문을 다듬어 줘"},
+                                 headers={"Authorization": f"Bearer {token}"})
+                for token in (first, first, second, third)
+            ]
+        self.assertEqual([response.status_code for response in responses], [200, 429, 200, 429])
+        self.assertIn("계정당", responses[1].json()["detail"])
+        self.assertIn("서비스", responses[3].json()["detail"])
+        self.assertIn("Retry-After", responses[3].headers)
+        self.assertEqual(provider.call_count, 2)
+
     def test_improve_rate_limits_repeated_requests(self):
         with patch("backend.main.get_provider", return_value=_ValidProvider()):
             first_response = self.client.post("/improve", json={"prompt": "draft prompt"})

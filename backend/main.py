@@ -179,7 +179,7 @@ def get_provider() -> PromptAnalysisProvider:
             model=settings.openai_model,
             api_base=settings.openai_api_base,
             timeout_seconds=settings.openai_timeout_seconds,
-            retry_attempts=settings.openai_retry_attempts,
+            retry_attempts=0 if settings.improve_public_access else settings.openai_retry_attempts,
             max_output_tokens=settings.openai_max_output_tokens,
         )
 
@@ -202,19 +202,22 @@ class InMemoryRateLimiter:
         self.window_seconds = max(1, window_seconds)
         self._events: DefaultDict[str, Deque[float]] = defaultdict(deque)
         self._lock = Lock()
+        self._next_cleanup = 0.0
 
     def allow(self, identifier: str, now: float | None = None) -> RateLimitResult:
         timestamp = now if now is not None else time.time()
 
         with self._lock:
-            events = self._events[identifier]
             cutoff = timestamp - self.window_seconds
+            if timestamp >= self._next_cleanup:
+                for key, recent in list(self._events.items()):
+                    if not recent or recent[-1] <= cutoff:
+                        del self._events[key]
+                self._next_cleanup = timestamp + self.window_seconds
+
+            events = self._events[identifier]
             while events and events[0] <= cutoff:
                 events.popleft()
-
-            if not events:
-                self._events.pop(identifier, None)
-                events = self._events[identifier]
 
             if len(events) >= self.max_requests:
                 retry_after = int(max(1, (events[0] + self.window_seconds) - timestamp))
@@ -239,6 +242,8 @@ _rate_limiter = InMemoryRateLimiter(
     max_requests=settings.rate_limit_max_requests,
     window_seconds=settings.rate_limit_window_seconds,
 )
+_public_user_limiter = InMemoryRateLimiter(max_requests=5, window_seconds=3600)
+_public_service_limiter = InMemoryRateLimiter(max_requests=30, window_seconds=3600)
 
 
 @app.on_event("startup")
@@ -312,12 +317,26 @@ def get_current_user(
 
 
 def get_improve_user(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.email.casefold() not in settings.improve_allowed_emails:
+    if not settings.improve_public_access and current_user.email.casefold() not in settings.improve_allowed_emails:
         raise HTTPException(
             status_code=403,
             detail="현재는 초대된 계정만 개선 기능을 사용할 수 있습니다. 테스트 참여 계정을 확인해 주세요.",
         )
     return current_user
+
+
+def _limit_public_improvement(user: User) -> None:
+    for limiter, key, message in (
+        (_public_user_limiter, user.google_sub, "계정당 1시간에 최대 5번 개선할 수 있어요. 잠시 후 다시 시도해 주세요."),
+        (_public_service_limiter, "service", "현재 서비스 개선 요청이 많아요. 잠시 후 다시 시도해 주세요."),
+    ):
+        result = limiter.allow(key)
+        if not result.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=message,
+                headers={"Retry-After": str(result.retry_after_seconds)},
+            )
 
 
 @app.middleware("http")
@@ -373,6 +392,8 @@ def improve_prompt(
     current_user: User = Depends(get_improve_user),
 ) -> ImproveResponse:
     """프롬프트를 분석해서 구조화된 개선 결과를 반환한다."""
+    if settings.improve_public_access:
+        _limit_public_improvement(current_user)
     try:
         provider = get_provider()
         logger.info(
